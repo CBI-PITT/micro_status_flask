@@ -13,7 +13,6 @@
         <h2 class="mb-4">MesoSPIM and RSCM Acquisition Data</h2>
         <div class="row">
             <!-- Sidebar Filter -->
-            <div class="col-md-3 mb-3">
                 <form method="get">
                     <label class="form-label fw-bold">Filter by Date</label>
                     <select name="time" class="form-select mb-3" onchange="this.form.submit()">
@@ -31,10 +30,8 @@
                         {% endfor %}
                     </select>
                 </form>
-            </div>
 
             <!-- Data Table -->
-            <div class="col-md-9">
                 <table id="dataTable" class="table table-striped" style="width:100%">
                     <thead>
                         <tr>
@@ -53,7 +50,6 @@
                         {% endfor %}
                     </tbody>
                 </table>
-            </div>
         </div>
     </div>
 
