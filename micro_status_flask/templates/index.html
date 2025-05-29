@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dataset Table</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+</head>
+<body class="p-4">
+    <div class="container">
+        <h2 class="mb-4">MesoSPIM and RSCM Acquisition Data</h2>
+        <div class="row">
+            <!-- Sidebar Filter -->
+            <div class="col-md-3 mb-3">
+                <form method="get">
+                    <label class="form-label fw-bold">Filter by Date</label>
+                    <select name="time" class="form-select mb-3" onchange="this.form.submit()">
+                        <option value="week" {% if selected_filter == 'week' %}selected{% endif %}>Past Week</option>
+                        <option value="month" {% if selected_filter == 'month' %}selected{% endif %}>Past Month</option>
+                        <option value="year" {% if selected_filter == 'year' %}selected{% endif %}>Past Year</option>
+                        <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>All Time</option>
+                    </select>
+
+                    <label class="form-label fw-bold">Filter by PI Name</label>
+                    <select name="name" class="form-select" onchange="this.form.submit()">
+                        <option value="">-- All PIs --</option>
+                        {% for pi_id, pi_name in pi_options %}
+                            <option value="{{ pi_id }}" {% if selected_name == pi_id|string %}selected{% endif %}>{{ pi_name }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+
+            <!-- Data Table -->
+            <div class="col-md-9">
+                <table id="dataTable" class="table table-striped" style="width:100%">
+                    <thead>
+                        <tr>
+                            {% for col in columns %}
+                                <th>{{ col }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                {% for cell in row %}
+                                    <td>{{ cell }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            $('#dataTable').DataTable({
+                paging: false
+            });
+        });
+    </script>
+</body>
+</html>
