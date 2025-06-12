@@ -115,7 +115,7 @@ def setup_auth(app):
             return redirect(url_for('login'))  # if the user doesn't exist or password is wrong, reload the page
 
         # if the above check passes, then we know the user has the right credentials
-        login_user(load_user(username), remember=remember)
+        login_user(load_user(username), remember=True)
         print('Got to here')
         return redirect(url_for('index'))
 
