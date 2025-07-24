@@ -1,15 +1,30 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, flash
 import sqlite3
 from datetime import datetime, timedelta
 
 from flask_login import login_required, current_user
 
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import FlaskForm
+from wtforms import StringField, SubmitField
+from wtforms.validators import DataRequired
+import os
+import subprocess
+
 import settings
 from auth import setup_auth, user_info
+from forms import DatasetForm
+from models import db, Dataset, PI
 
 app = Flask(__name__)
 
 app, login_manager = setup_auth(app)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'your-secret-key'
+
+db.init_app(app)
 
 # def get_data():
 #     conn = sqlite3.connect(settings.DB_LOCATION)
@@ -90,6 +105,49 @@ def index():
         pi_options=pi_options,
         current_user=current_user
     )
+
+@app.route('/datasets')
+def list_datasets():
+    ds = Dataset.query.all()
+    return render_template('datasets.html', datasets=ds)
+
+
+@app.route('/datasets/<int:dataset_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_dataset(dataset_id):
+    dataset = Dataset.query.get_or_404(dataset_id)
+    form = DatasetForm(obj=dataset)
+
+    # Populate PI choices
+    form.pi.choices = [(pi.id, pi.name) for pi in PI.query.order_by(PI.name).all()]
+
+    if form.validate_on_submit():
+        form.populate_obj(dataset)
+        db.session.commit()
+        flash("Dataset updated successfully.", "success")
+        return redirect(url_for('list_datasets'))  # or wherever your list route is
+
+    return render_template('edit_dataset.html', form=form, dataset=dataset)
+
+
+@app.route('/datasets/<int:dataset_id>/restart', methods=['POST'])
+@login_required
+def restart_processing(dataset_id):
+    dataset = Dataset.query.get_or_404(dataset_id)
+    if dataset.modality == "mesospim":
+        cmd = [
+            '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
+            '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+            'automated-method-slurm',
+            dataset.path_on_fast_store if ' ' not in dataset.path_on_fast_store else f'"{dataset.path_on_fast_store}"'
+        ]
+        try:
+            subprocess.run(cmd)
+            flash(f"Processing restarted for dataset {dataset.id}.", "success")
+        except subprocess.CalledProcessError as e:
+            flash(f"Failed to restart processing: {e}", "danger")
+
+    return redirect(url_for('edit_dataset', dataset_id=dataset.id))
 
 
 if __name__ == '__main__':
