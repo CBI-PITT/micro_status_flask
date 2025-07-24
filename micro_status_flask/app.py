@@ -76,35 +76,54 @@ def get_data(date_filter, name_filter):
 @app.route('/')
 @login_required
 def index():
+    # Get filters from query parameters
     date_filter = request.args.get('time', 'week')
-    pi_id_filter = request.args.get('name', '')  # still using 'name' as the param, but it's actually the id
+    pi_id_filter = request.args.get('name', '')
 
-    # Fetch PI names
-    conn = sqlite3.connect(settings.DB_LOCATION)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM pi")
-    pi_options = cursor.fetchall()
-    conn.close()
+    # Fetch all PIs for filter dropdown
+    pi_options = [(pi.id, pi.name) for pi in PI.query.order_by(PI.name).all()]
 
-    if current_user.get_id() == "CBI_Admin":
-        columns, rows = get_data(date_filter, pi_id_filter)
+    # Build base query
+    query = Dataset.query
+
+    # Date filtering
+    now = datetime.now()
+    if date_filter == 'week':
+        since = now - timedelta(weeks=1)
+    elif date_filter == 'month':
+        since = now - timedelta(days=30)
+    elif date_filter == 'year':
+        since = now - timedelta(days=365)
     else:
-        pi_id = [pi_id for pi_id, pi_name in pi_options if pi_name == current_user.get_id()]
-        if len(pi_id):
-            pi_id_filter = pi_id[0]
-            columns, rows = get_data(date_filter, pi_id_filter)
+        since = None
+
+    if since:
+        query = query.filter(Dataset.created != None)  # Skip NULLs
+        query = query.filter(Dataset.created >= since.strftime('%Y-%m-%d'))
+
+    # PI-based filtering
+    if current_user.get_id() == "CBI_Admin":
+        if pi_id_filter:
+            query = query.filter(Dataset.pi == int(pi_id_filter))
+    else:
+        user_pi = PI.query.filter_by(name=current_user.get_id()).first()
+        if user_pi:
+            query = query.filter(Dataset.pi == user_pi.id)
+            pi_id_filter = user_pi.id  # Persist this to highlight in UI
         else:
-            columns, rows = [], []
+            query = query.filter(False)  # Return empty result set
+
+    datasets = query.all()
 
     return render_template(
         'index.html',
-        columns=columns,
-        rows=rows,
+        datasets=datasets,
         selected_filter=date_filter,
         selected_name=pi_id_filter,
         pi_options=pi_options,
         current_user=current_user
     )
+
 
 @app.route('/datasets')
 def list_datasets():
@@ -125,7 +144,7 @@ def edit_dataset(dataset_id):
         form.populate_obj(dataset)
         db.session.commit()
         flash("Dataset updated successfully.", "success")
-        return redirect(url_for('list_datasets'))  # or wherever your list route is
+        return redirect(url_for('index'))  # or wherever your list route is
 
     return render_template('edit_dataset.html', form=form, dataset=dataset)
 

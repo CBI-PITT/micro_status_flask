@@ -1,45 +1,64 @@
 {% extends "base.html" %}
 {% block content %}
-        <h2 class="mb-4">MesoSPIM and RSCM Acquisition Data</h2>
-        <div class="row">
-            <!-- Sidebar Filter -->
-                <form method="get">
-                    <label class="form-label fw-bold">Filter by Date</label>
-                    <select name="time" class="form-select mb-3" onchange="this.form.submit()">
-                        <option value="week" {% if selected_filter == 'week' %}selected{% endif %}>Past Week</option>
-                        <option value="month" {% if selected_filter == 'month' %}selected{% endif %}>Past Month</option>
-                        <option value="year" {% if selected_filter == 'year' %}selected{% endif %}>Past Year</option>
-                        <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>All Time</option>
-                    </select>
-                    {% if current_user.get_id() == "CBI_Admin" %}
-                    <label class="form-label fw-bold">Filter by PI Name</label>
-                    <select name="name" class="form-select" onchange="this.form.submit()">
-                        <option value="">-- All PIs --</option>
-                        {% for pi_id, pi_name in pi_options %}
-                            <option value="{{ pi_id }}" {% if selected_name == pi_id|string %}selected{% endif %}>{{ pi_name }}</option>
-                        {% endfor %}
-                    </select>
-                    {% endif %}
-                </form>
+    <h2 class="mb-4">MesoSPIM and RSCM Acquisition Data</h2>
+    <div class="row">
+        <!-- Filter Form -->
+        <form method="get" class="mb-4">
+            <label class="form-label fw-bold">Filter by Date</label>
+            <select name="time" class="form-select mb-3" onchange="this.form.submit()">
+                <option value="week" {% if selected_filter == 'week' %}selected{% endif %}>Past Week</option>
+                <option value="month" {% if selected_filter == 'month' %}selected{% endif %}>Past Month</option>
+                <option value="year" {% if selected_filter == 'year' %}selected{% endif %}>Past Year</option>
+                <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>All Time</option>
+            </select>
 
-            <!-- Data Table -->
-                <table id="dataTable" class="table table-striped" style="width:100%">
-                    <thead>
-                        <tr>
-                            {% for col in columns %}
-                                <th>{{ col }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in rows %}
-                            <tr>
-                                {% for cell in row %}
-                                    <td>{{ cell }}</td>
-                                {% endfor %}
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-        </div>
+            {% if current_user.get_id() == "CBI_Admin" %}
+            <label class="form-label fw-bold">Filter by PI Name</label>
+            <select name="name" class="form-select" onchange="this.form.submit()">
+                <option value="">-- All PIs --</option>
+                {% for pi_id, pi_name in pi_options %}
+                    <option value="{{ pi_id }}" {% if selected_name == pi_id|string %}selected{% endif %}>{{ pi_name }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+        </form>
+
+        <!-- Data Table -->
+        <table id="dataTable" class="table table-striped" style="width:100%">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Path</th>
+<!--                    <th>PI</th>-->
+<!--                    <th>CL Number</th>-->
+                    <th>Imaging Status</th>
+                    <th>Processing Status</th>
+                    <th>Moved</th>
+                    <th>Moving</th>
+                    <th>Paused</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ds in datasets %}
+                    <tr>
+                        <td>{{ ds.id }}</td>
+                        <td>{{ ds.path_on_fast_store.replace("/CBI_FastStore/Acquire/", "") }}</td>
+<!--                        <td>{{ ds.pi_obj.name if ds.pi_obj else '' }}</td>-->
+<!--                        <td>{{ ds.cl_obj.name if ds.cl_obj else '' }}</td>-->
+                        <td>{{ ds.imaging_status }}</td>
+                        <td>{{ ds.processing_status }}</td>
+                        <td>{{ ds.moved }}</td>
+                        <td>{{ ds.moving }}</td>
+                        <td>{{ ds.paused }}</td>
+                        <td>{{ ds.created.split("_")[0] if ds.created else "" }}</td>
+                        <td>
+                            <a href="{{ url_for('edit_dataset', dataset_id=ds.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 {% endblock %}
