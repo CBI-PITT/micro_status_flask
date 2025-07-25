@@ -165,6 +165,13 @@ def restart_processing(dataset_id):
             flash(f"Processing restarted for dataset {dataset.id}.", "success")
         except subprocess.CalledProcessError as e:
             flash(f"Failed to restart processing: {e}", "danger")
+    elif dataset.modality == "rscm":
+        rscm_txt_file_name = f"{str(dataset.id).zfill(5)}_{dataset.pi_obj.name}_{dataset.cl_obj.name}_{dataset.name}.txt"
+        txt_file_path = os.path.join(settings.RSCM_FOLDER_STITCHING, 'queueStitch', rscm_txt_file_name)
+        # txt_file_path = os.path.join(settings.RSCM_FOLDER_STITCHING, 'tempQueue', rscm_txt_file_name)
+        contents = f'rootDir="{dataset.path_on_fast_store}"\nkeepComposites=True\nmoveToHive=False'
+        with open(txt_file_path, "w") as f:
+            f.write(contents)
 
     return redirect(url_for('edit_dataset', dataset_id=dataset.id))
 
