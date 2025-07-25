@@ -42,8 +42,6 @@ class Dataset(db.Model):
     moving = db.Column(db.Integer, default=0)
     paused = db.Column(db.Integer, default=0)
 
-    # pi_obj = db.relationship('PI', backref='datasets', lazy=True)
-
 
 class PI(db.Model):
     __tablename__ = 'pi'

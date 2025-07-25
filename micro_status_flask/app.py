@@ -14,7 +14,7 @@ import subprocess
 import settings
 from auth import setup_auth, user_info
 from forms import DatasetForm
-from models import db, Dataset, PI
+from models import CLNumber, db, Dataset, PI
 
 app = Flask(__name__)
 
@@ -174,6 +174,27 @@ def restart_processing(dataset_id):
             f.write(contents)
 
     return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+
+@app.route('/datasets/new', methods=['GET', 'POST'])
+@login_required
+def create_dataset():
+    form = DatasetForm()
+
+    form.pi.choices = [(pi.id, pi.name) for pi in PI.query.all()]
+    form.cl_number.choices = [(cl.id, cl.name) for cl in CLNumber.query.all()]
+
+    if form.validate_on_submit():
+        new_dataset = Dataset()
+        form.populate_obj(new_dataset)
+        new_dataset.created = datetime.now().strftime(settings.DATETIME_FORMAT)
+        db.session.add(new_dataset)
+        db.session.commit()
+        flash("Dataset created successfully!", "success")
+        return redirect(url_for('index'))  # or 'index' depending on your list view
+
+    return render_template('create_dataset.html', form=form)
+
 
 
 if __name__ == '__main__':
