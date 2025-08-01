@@ -3,6 +3,8 @@ from wtforms import StringField, IntegerField, BooleanField, SelectField, Submit
 from wtforms.validators import Optional, DataRequired
 
 class DatasetForm(FlaskForm):
+    class Meta:
+        csrf = False
     name = StringField("Name", validators=[Optional()])
     path_on_fast_store = StringField("Path on Fast Store", validators=[Optional()])
     cl_number = IntegerField("CL Number", validators=[Optional()])
@@ -37,5 +39,6 @@ class DatasetForm(FlaskForm):
     moved = RadioField("Moved", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
     moving = RadioField("Moving", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
     paused = RadioField("Paused", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    public = RadioField("Public", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
 
     submit = SubmitField("Save")

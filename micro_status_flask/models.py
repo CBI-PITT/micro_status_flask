@@ -41,6 +41,7 @@ class Dataset(db.Model):
     moved = db.Column(db.Integer, default=0)
     moving = db.Column(db.Integer, default=0)
     paused = db.Column(db.Integer, default=0)
+    public = db.Column(db.Integer, default=0)
 
 
 class PI(db.Model):
