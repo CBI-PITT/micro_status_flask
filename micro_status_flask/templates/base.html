@@ -11,7 +11,7 @@
 <body class="p-4">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">MicroStatus</a>
+            <a class="navbar-brand" href="{{ url_for('index') }}">MicroStatus</a>
             <div class="d-flex ms-auto align-items-center text-white">
                 {% if current_user.is_authenticated %}
                     <span class="me-3">Welcome, {{ current_user.get_id() }}</span>

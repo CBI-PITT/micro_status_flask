@@ -1,0 +1,44 @@
+from flask_wtf import FlaskForm
+from wtforms import StringField, IntegerField, BooleanField, SelectField, SubmitField, RadioField
+from wtforms.validators import Optional, DataRequired
+
+class DatasetForm(FlaskForm):
+    class Meta:
+        csrf = False
+    name = StringField("Name", validators=[Optional()])
+    path_on_fast_store = StringField("Path on Fast Store", validators=[Optional()])
+    cl_number = IntegerField("CL Number", validators=[Optional()])
+    pi = SelectField("PI", coerce=int, validators=[Optional()])
+    imaging_status = StringField("Imaging Status", validators=[Optional()])
+    processing_status = StringField("Processing Status", validators=[Optional()])
+    path_on_hive = StringField("Path on Hive", validators=[Optional()])
+    job_number = StringField("Job Number", validators=[Optional()])
+    imaris_file_path = StringField("Imaris File Path", validators=[Optional()])
+    channels = IntegerField("Channels", validators=[Optional()])
+    z_layers_total = IntegerField("Z Layers Total", validators=[Optional()])
+    z_layers_current = IntegerField("Z Layers Current", validators=[Optional()])
+    ribbons_total = IntegerField("Ribbons Total", validators=[Optional()])
+    ribbons_finished = IntegerField("Ribbons Finished", validators=[Optional()])
+    tiles_total = IntegerField("Tiles Total", validators=[Optional()])
+    tiles_finished = IntegerField("Tiles Finished", validators=[Optional()])
+    tiles_x = IntegerField("Tiles X", validators=[Optional()])
+    tiles_y = IntegerField("Tiles Y", validators=[Optional()])
+    resolution_xy = StringField("Resolution XY", validators=[Optional()])
+    resolution_z = StringField("Resolution Z", validators=[Optional()])
+    imaging_no_progress_time = StringField("Imaging No Progress Time", validators=[Optional()])
+    processing_no_progress_time = StringField("Processing No Progress Time", validators=[Optional()])
+    processing_summary = StringField("Processing Summary", validators=[Optional()])
+    z_layers_checked = IntegerField("Z Layers Checked", validators=[Optional()])
+    keep_composites = RadioField("Keep Composites", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    delete_405 = RadioField("Delete 405", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    created = StringField("Created", validators=[Optional()])
+    modality = StringField("Modality", validators=[Optional()])
+    is_brain = RadioField("Is Brain", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    peace_json_created = RadioField("Peace JSON Created", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    imaging_summary = StringField("Imaging Summary", validators=[Optional()])
+    moved = RadioField("Moved", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    moving = RadioField("Moving", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    paused = RadioField("Paused", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    public = RadioField("Public", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+
+    submit = SubmitField("Save")

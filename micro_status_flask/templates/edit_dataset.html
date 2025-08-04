@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Edit Dataset: {{ dataset.name }}</h2>
+
+    <form method="POST">
+        {{ form.hidden_tag() }}
+
+        {% for field in form if field.name not in ['csrf_token', 'submit'] %}
+            <div class="mb-3">
+                {{ field.label(class="form-label") }}
+                {% if field.type == 'RadioField' %}
+                    <div>
+                        {% for subfield in field %}
+                            <div class="form-check form-check-inline">
+                                {{ subfield(class="form-check-input") }}
+                                {{ subfield.label(class="form-check-label") }}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    {{ field(class="form-control") }}
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        {{ form.submit(class="btn btn-primary") }}
+    </form>
+    <form method="POST" action="{{ url_for('restart_processing', dataset_id=dataset.id) }}">
+        <button type="submit" class="btn btn-danger mt-3">Restart Processing</button>
+    </form>
+</div>
+{% endblock %}
