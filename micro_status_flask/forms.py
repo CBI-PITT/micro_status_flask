@@ -7,7 +7,7 @@ class DatasetForm(FlaskForm):
         csrf = False
     name = StringField("Name", validators=[Optional()])
     path_on_fast_store = StringField("Path on Fast Store", validators=[Optional()])
-    cl_number = IntegerField("CL Number", validators=[Optional()])
+    cl_number = SelectField("CL Number", coerce=int, validators=[Optional()])
     pi = SelectField("PI", coerce=int, validators=[Optional()])
     imaging_status = StringField("Imaging Status", validators=[Optional()])
     processing_status = StringField("Processing Status", validators=[Optional()])
@@ -41,4 +41,10 @@ class DatasetForm(FlaskForm):
     paused = RadioField("Paused", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
     public = RadioField("Public", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
 
+    submit = SubmitField("Save")
+
+class CreateDatasetForm(FlaskForm):
+    class Meta:
+        csrf = False
+    path_on_fast_store = StringField("Path")
     submit = SubmitField("Save")

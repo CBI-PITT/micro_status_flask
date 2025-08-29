@@ -9,11 +9,13 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
 import os
+import re
 import subprocess
+from pathlib import Path
 
 import settings
 from auth import setup_auth, user_info
-from forms import DatasetForm
+from forms import CreateDatasetForm, DatasetForm
 from models import CLNumber, db, Dataset, PI
 
 app = Flask(__name__)
@@ -144,7 +146,7 @@ def edit_dataset(dataset_id):
         form.populate_obj(dataset)
         db.session.commit()
         flash("Dataset updated successfully.", "success")
-        return redirect(url_for('index'))  # or wherever your list route is
+        return redirect(url_for('index'))
 
     return render_template('edit_dataset.html', form=form, dataset=dataset)
 
@@ -179,15 +181,46 @@ def restart_processing(dataset_id):
 @app.route('/datasets/new', methods=['GET', 'POST'])
 @login_required
 def create_dataset():
-    form = DatasetForm()
-
-    form.pi.choices = [(pi.id, pi.name) for pi in PI.query.all()]
-    form.cl_number.choices = [(cl.id, cl.name) for cl in CLNumber.query.all()]
+    form = CreateDatasetForm()
 
     if form.validate_on_submit():
         new_dataset = Dataset()
         form.populate_obj(new_dataset)
         new_dataset.created = datetime.now().strftime(settings.DATETIME_FORMAT)
+        new_dataset.imaging_status = "in_progress"
+        new_dataset.processing_status = "not_started"
+        root_dir = ""
+        if new_dataset.path_on_fast_store.startswith(settings.FASTSTORE_ACQUISITION_FOLDER):
+            if new_dataset.path_on_fast_store.startswith(settings.RSCM_FASTSTORE_ACQUISITION_FOLDER):
+                new_dataset.modality = "rscm"
+                root_dir = settings.RSCM_FASTSTORE_ACQUISITION_FOLDER
+            elif new_dataset.path_on_fast_store.startswith(settings.MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
+                new_dataset.modality = "mesospim"
+                root_dir = settings.MESOSPIM_FASTSTORE_ACQUISITION_FOLDER
+        elif new_dataset.path_on_fast_store.startswith(settings.HIVE_ACQUISITION_FOLDER):
+            if new_dataset.path_on_fast_store.startswith(settings.RSCM_HIVE_ACQUISITION_FOLDER):
+                new_dataset.modality = "rscm"
+                root_dir = settings.RSCM_HIVE_ACQUISITION_FOLDER
+            elif new_dataset.path_on_fast_store.startswith(settings.MESOSPIM_HIVE_ACQUISITION_FOLDER):
+                new_dataset.modality = "mesospim"
+                root_dir = settings.MESOSPIM_HIVE_ACQUISITION_FOLDER
+        relative_path = new_dataset.path_on_fast_store
+        relative_path = relative_path.replace(root_dir, "")
+        relative_path = Path(relative_path)
+        path_parts = relative_path.parts
+        if len(path_parts) >= 2:
+            last_name_pattern = r"^[A-Za-z '-_]+$"
+            pi_name = path_parts[1] if re.findall(last_name_pattern, path_parts[1]) else None
+            if pi_name:
+                pi_obj = PI.query.filter_by(name=pi_name).first()
+                new_dataset.pi = pi_obj.id
+        if len(path_parts) >= 3:
+            cl_number = path_parts[2] if 'CL' in path_parts[2].upper() else '00CL00'
+            cl_obj = CLNumber.query.filter_by(name=cl_number).first()
+            new_dataset.cl_number = cl_obj.id
+        if len(path_parts) >= 4:
+            name = path_parts[3]
+            new_dataset.name = name
         db.session.add(new_dataset)
         db.session.commit()
         flash("Dataset created successfully!", "success")
