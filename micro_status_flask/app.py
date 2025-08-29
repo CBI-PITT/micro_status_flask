@@ -25,6 +25,7 @@ app, login_manager = setup_auth(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your-secret-key'
+app.config['WTF_CSRF_ENABLED'] = False
 
 db.init_app(app)
 
@@ -141,6 +142,7 @@ def edit_dataset(dataset_id):
 
     # Populate PI choices
     form.pi.choices = [(pi.id, pi.name) for pi in PI.query.order_by(PI.name).all()]
+    form.cl_number.choices = [(cl.id, cl.name) for cl in CLNumber.query.all()]
 
     if form.validate_on_submit():
         form.populate_obj(dataset)
