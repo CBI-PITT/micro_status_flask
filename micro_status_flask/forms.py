@@ -7,7 +7,7 @@ class DatasetForm(FlaskForm):
         csrf = False
     name = StringField("Name", validators=[Optional()])
     path_on_fast_store = StringField("Path on Fast Store", validators=[Optional()])
-    cl_number = IntegerField("CL Number", validators=[Optional()])
+    cl_number = SelectField("CL Number", coerce=int, validators=[Optional()])
     pi = SelectField("PI", coerce=int, validators=[Optional()])
     imaging_status = StringField("Imaging Status", validators=[Optional()])
     processing_status = StringField("Processing Status", validators=[Optional()])
