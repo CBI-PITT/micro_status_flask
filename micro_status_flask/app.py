@@ -154,11 +154,19 @@ def edit_dataset(dataset_id):
 def restart_processing(dataset_id):
     dataset = Dataset.query.get_or_404(dataset_id)
     if dataset.modality == "mesospim":
-        cmd = [
-            '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
-            '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+        # cmd = [     # old version for btf only
+        #     '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
+        #     '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+        #     'automated-method-slurm',
+        #     dataset.path_on_fast_store if ' ' not in dataset.path_on_fast_store else f'"{dataset.path_on_fast_store}"'
+        # ]
+        cmd = [    # new version for zarr
+            '/h20/home/lab/miniconda3/envs/mesospim_dev/bin/python',
+            '/h20/home/lab/src/mesospim_utils_v0.1/mesospim_utils/automated.py',
             'automated-method-slurm',
-            dataset.path_on_fast_store if ' ' not in dataset.path_on_fast_store else f'"{dataset.path_on_fast_store}"'
+            dataset.path_on_fast_store if ' ' not in dataset.path_on_fast_store else f'"{dataset.path_on_fast_store}"',
+            '--final-file-type',
+            'ims'
         ]
         try:
             subprocess.run(cmd)
