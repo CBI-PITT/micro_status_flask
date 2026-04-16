@@ -26,8 +26,13 @@
 
         {{ form.submit(class="btn btn-primary") }}
     </form>
-    <form method="POST" action="{{ url_for('restart_processing', dataset_id=dataset.id) }}">
-        <button type="submit" class="btn btn-danger mt-3">Restart Processing</button>
-    </form>
+    <div class="d-flex gap-2 mt-3">
+        <form method="POST" action="{{ url_for('restart_processing', dataset_id=dataset.id) }}">
+            <button type="submit" class="btn btn-danger">Restart Processing</button>
+        </form>
+        <form method="POST" action="{{ url_for('move_dataset_to_h20', dataset_id=dataset.id) }}">
+            <button type="submit" class="btn btn-warning">Move To /h20</button>
+        </form>
+    </div>
 </div>
 {% endblock %}
