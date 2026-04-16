@@ -1,3 +1,7 @@
 DB_LOCATION = "/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db"
+FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/"
+HIVE_ACQUISITION_FOLDER = "/h20/Acquire/"
+FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
+MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 RSCM_FOLDER_STITCHING =  "/CBI_FastStore/clusterStitchTEST"
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"

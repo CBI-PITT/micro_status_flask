@@ -1,15 +1,16 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+import os
+import re
+import shlex
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 
+from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
-
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
-import os
-import subprocess
 
 import settings
 from auth import setup_auth, user_info
@@ -25,6 +26,25 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your-secret-key'
 
 db.init_app(app)
+
+
+def move_job_base_name(dataset):
+    pi_name = dataset.pi_obj.name if dataset.pi_obj else "unknown_pi"
+    cl_name = dataset.cl_obj.name if dataset.cl_obj else "unknown_cl"
+    raw_name = f"{str(dataset.id).zfill(5)}_{pi_name}_{cl_name}_{dataset.name}"
+    return re.sub(r'[^A-Za-z0-9._-]+', '_', raw_name)
+
+
+def ensure_move_job_dirs():
+    move_dirs = {
+        'scripts': os.path.join(settings.MOVE_JOBS_DIR, 'scripts'),
+        'logs': os.path.join(settings.MOVE_JOBS_DIR, 'logs'),
+        'complete': os.path.join(settings.MOVE_JOBS_DIR, 'complete'),
+        'error': os.path.join(settings.MOVE_JOBS_DIR, 'error'),
+    }
+    for path in move_dirs.values():
+        os.makedirs(path, exist_ok=True)
+    return move_dirs
 
 # def get_data():
 #     conn = sqlite3.connect(settings.DB_LOCATION)
@@ -181,6 +201,111 @@ def restart_processing(dataset_id):
         with open(txt_file_path, "w") as f:
             f.write(contents)
 
+    return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+
+@app.route('/datasets/<int:dataset_id>/move', methods=['POST'])
+@login_required
+def move_dataset_to_h20(dataset_id):
+    dataset = Dataset.query.get_or_404(dataset_id)
+    src_path = dataset.path_on_fast_store or ''
+    dst_path = src_path.replace(settings.FASTSTORE_ACQUISITION_FOLDER, settings.HIVE_ACQUISITION_FOLDER, 1)
+
+    if src_path.startswith(settings.HIVE_ACQUISITION_FOLDER):
+        flash(f"Dataset {dataset.id} is already at /h20. No move was submitted.", "warning")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    if not src_path.startswith(settings.FASTSTORE_ACQUISITION_FOLDER):
+        flash(f"Dataset {dataset.id} is not under {settings.FASTSTORE_ACQUISITION_FOLDER}.", "danger")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    if dataset.moving:
+        flash(f"Move already in progress for dataset {dataset.id}.", "warning")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    if dataset.moved:
+        flash(f"Dataset {dataset.id} has already been marked as moved.", "warning")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    if not os.path.isdir(src_path):
+        if os.path.isdir(dst_path):
+            flash(
+                f"Dataset {dataset.id} was not found on /CBI_FastStore and already exists at /h20. No move was submitted.",
+                "warning",
+            )
+        else:
+            flash(f"Source dataset folder does not exist: {src_path}", "danger")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    move_dirs = ensure_move_job_dirs()
+    move_base_name = move_job_base_name(dataset)
+    move_log_path = os.path.join(move_dirs['logs'], f"{move_base_name}.log")
+    move_script_path = os.path.join(move_dirs['scripts'], f"{move_base_name}.sbatch.sh")
+    move_complete_marker = os.path.join(move_dirs['complete'], f"{move_base_name}.done")
+    move_error_marker = os.path.join(move_dirs['error'], f"{move_base_name}.error")
+    trash_path = os.path.join(
+        settings.FASTSTORE_TRASH_LOCATION,
+        os.path.relpath(src_path, settings.FASTSTORE_ACQUISITION_FOLDER),
+    )
+
+    for marker in [move_complete_marker, move_error_marker]:
+        if os.path.exists(marker):
+            os.remove(marker)
+
+    script_contents = f"""#!/bin/bash
+#SBATCH --job-name=move_{str(dataset.id).zfill(5)}
+#SBATCH --partition=compute
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --output={move_log_path}
+#SBATCH --error={move_log_path}
+
+set -euo pipefail
+
+SRC={shlex.quote(src_path)}
+BASE_DST={shlex.quote(dst_path)}
+TRASH={shlex.quote(trash_path)}
+COMPLETE_MARKER={shlex.quote(move_complete_marker)}
+ERROR_MARKER={shlex.quote(move_error_marker)}
+
+cleanup_on_error() {{
+    status=$?
+    mkdir -p "$(dirname "$ERROR_MARKER")"
+    printf 'move failed for %s -> %s (exit %s)\n' "$SRC" "${{DST:-$BASE_DST}}" "$status" > "$ERROR_MARKER"
+    exit $status
+}}
+trap cleanup_on_error ERR
+
+DST="$BASE_DST"
+if [ -e "$DST" ]; then
+    suffix=2
+    while [ -e "${{BASE_DST}}_${{suffix}}" ]; do
+        suffix=$((suffix + 1))
+    done
+    DST="${{BASE_DST}}_${{suffix}}"
+fi
+
+mkdir -p "$(dirname "$DST")" "$(dirname "$TRASH")" "$(dirname "$COMPLETE_MARKER")"
+
+rclone copy "$SRC" "$DST" --progress --transfers=4 --checkers=8 --size-only --fast-list
+rclone check "$SRC" "$DST" --size-only
+mv "$SRC" "$TRASH"
+printf '%s\n' "$DST" > "$COMPLETE_MARKER"
+rm -f "$ERROR_MARKER"
+"""
+
+    with open(move_script_path, 'w') as handle:
+        handle.write(script_contents)
+
+    os.chmod(move_script_path, 0o750)
+    result = subprocess.run(['sbatch', move_script_path], capture_output=True, text=True)
+    if result.returncode != 0:
+        flash(f"Failed to submit move job for dataset {dataset.id}: {result.stderr.strip()}", "danger")
+        return redirect(url_for('edit_dataset', dataset_id=dataset.id))
+
+    dataset.moving = 1
+    db.session.commit()
+    flash(f"Move to /h20 submitted for dataset {dataset.id}.", "success")
     return redirect(url_for('edit_dataset', dataset_id=dataset.id))
 
 
