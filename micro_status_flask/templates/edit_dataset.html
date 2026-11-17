@@ -33,6 +33,9 @@
         <form method="POST" action="{{ url_for('move_dataset_to_h20', dataset_id=dataset.id) }}">
             <button type="submit" class="btn btn-warning">Move To /h20</button>
         </form>
+        {% if show_mosaic %}
+            <a class="btn btn-info" href="{{ url_for('mosaic_view', dataset_id=dataset.id) }}">Align OME-Zarr tiles</a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

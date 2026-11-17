@@ -68,6 +68,7 @@ The **shared SQLite database is the contract between the two projects**:
 | `/datasets/new` | Create a new record (sets the `created` timestamp). |
 | `/datasets/<id>/restart` | Restart processing. MesoSPIM: submits `mesospim_utils` (`automated.py`) as a SLURM job (zarr input, `ims` final file). RSCM: writes a stitch-queue file under `RSCM_FOLDER_STITCHING/queueStitch`. |
 | `/datasets/<id>/move` | Move a dataset to `<HIVE_ROOT>`: generates an sbatch script (`rclone copy` → `rclone check` → source to trash, with complete/error markers) under `<FS_ROOT>/tmp/move_jobs`, submits it, sets `moving=1`. |
+| `/datasets/<id>/mosaic` | Align MesoSPIM OME-Zarr 0.4 tiles on a zoomable z-plane and save the positions in `mosaic.json` beside the dataset. |
 | `/login`, `/logout`, `/profile` | LDAP authentication (see below). |
 
 ## Authentication
@@ -87,6 +88,8 @@ The **shared SQLite database is the contract between the two projects**:
 | `micro_status_flask/auth.py` | Login manager, LDAP auth, login/logout/profile routes, rate limiting |
 | `micro_status_flask/models.py` | SQLAlchemy models (`Dataset`, `PI`, `CLNumber`) mapping the existing schema |
 | `micro_status_flask/forms.py` | WTForms definitions (`DatasetForm`) |
+| `micro_status_flask/mosaic.py` | Discover stage-positioned OME-Zarr tiles, render selected slices and save manifests |
+| `micro_status_flask/static/mosaic.js` | Tile alignment controls and viewport-aware image loading |
 | `micro_status_flask/settings.py` | Paths shared with the bot (DB location, storage folders, move-jobs dir) |
 | `micro_status_flask/templates/` | Jinja templates |
 | `micro_status_flask/data.db` | Stale local artifact — the real DB is at `<FS_ROOT>/RSCM_MesoSPIM_datasets.db` |
@@ -121,7 +124,38 @@ Notes:
 - Dependencies (no `requirements.txt` is tracked): Flask, Flask-SQLAlchemy,
   Flask-Login, Flask-WTF/WTForms, ldap3, flask-limiter, plus `flask_file_browser`
   (used for the auth config, below).
+- Install the additional tile-viewer packages into that same environment with
+  `python -m pip install -r requirements-viewer.txt` from the repository root.
+  The existing `microstatus-flask` environment may not have NumPy, Pillow, or Zarr.
 - `python3 -m compileall micro_status_flask` is the safe syntax check.
+
+## MesoSPIM OME-Zarr tile alignment
+
+On a MesoSPIM dataset's edit page, select **Align OME-Zarr tiles**. The viewer
+finds acquisitions in the dataset directory (or one directory below), including
+either its FastStore or Hive location. It requires numbered, rectangular,
+column-major `Tile0`, `Tile1`, ... OME-Zarr 0.4 groups with stage translations in
+their multiscales metadata. Select an acquisition if more than one is present.
+The first channel is shown; the resulting geometry applies to all channels.
+
+The viewer starts at the middle z-plane with low-resolution images. Scroll to
+zoom into the tiles in view and use the z and common contrast sliders. Select
+**Pan** to drag the image or **Move tiles** to drag a tile into coarse alignment;
+in Move mode, dragging the background still pans. In overlapping areas, the
+topmost tile is selected. Use each tile's arrow buttons to move it one
+highest-resolution pixel at a time (Shift+arrow button moves ten). Click
+**Save positions** to create or update
+`mosaic.json` in the dataset directory. Existing positions for the selected
+acquisition are loaded when reopening it. A dataset has a single `mosaic.json`,
+so saving another acquisition replaces that manifest. Its `tiles` or `channels`,
+`rows`, `cols` and `positions_zyx` keys are compatible with
+`mesospim_virtual_zarr`'s manifest loader; tile paths are relative to the
+manifest. The viewer reads source tiles without modifying them.
+
+The image routes serve on-demand PNG patches and cache a few decoded planes.
+The largest level-0 chunks in the supplied example expand to roughly 550 MiB;
+image reads are serialized to keep concurrent zoom requests from multiplying
+that memory usage.
 
 ## External auth config
 
