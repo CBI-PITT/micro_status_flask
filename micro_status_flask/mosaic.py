@@ -1,7 +1,8 @@
 """Read-only MesoSPIM tile discovery and on-demand 2-D image rendering.
 
-The only disk write in this module is an explicitly requested mosaic.json save.
-All paths used for image requests come from the dataset directory, never a URL.
+The only disk writes in this module are explicitly requested mosaic.json and
+gain.json saves. All paths used for image requests come from the dataset
+directory, never a URL.
 """
 
 import json
@@ -19,6 +20,8 @@ TILE_SIZE = 512
 TILE_NAME = re.compile(r"(?:^|_)Tile(\d+)(?:_|\.)", re.IGNORECASE)
 CHANNEL_NAME = re.compile(r"(?:^|_)Ch([A-Za-z0-9]+)(?:_|\.)", re.IGNORECASE)
 IMAGE_READS = BoundedSemaphore(1)
+GAIN_MIN = 0.01
+GAIN_MAX = 100.0
 
 
 class MosaicError(ValueError):
@@ -119,6 +122,32 @@ def _metadata(path):
     except (OSError, KeyError, IndexError, TypeError, StopIteration,
             json.JSONDecodeError) as exc:
         raise MosaicError(f'{path.name}: invalid OME-Zarr metadata: {exc}') from exc
+
+
+@lru_cache(maxsize=1024)
+def _shutter(meta_path):
+    """Read the [Shutter] line from a tile's _meta.txt sidecar."""
+    try:
+        text = Path(meta_path).read_text(encoding='utf-8')
+    except OSError:
+        return None
+    match = re.search(r'^\[Shutter\]\s*(.+?)\s*$', text, re.MULTILINE)
+    if not match:
+        return None
+    value = match.group(1).lower()
+    if value.startswith('left'):
+        return 'L'
+    if value.startswith('right'):
+        return 'R'
+    return '?'
+
+
+def _tile_arm(tile):
+    """Arm used to acquire a tile, from its _meta.txt sidecar next to the
+    acquisition folder, named {acquisition}_{tile}_meta.txt."""
+    acquisition = tile['path'].parent
+    meta = acquisition.parent / f"{acquisition.name}_{tile['path'].name}_meta.txt"
+    return _shutter(meta) or '?'
 
 
 def _clusters(values, tolerance):
@@ -326,6 +355,88 @@ def view_data(root, group, manifest):
     }
 
 
+def brightness_data(group, manifest, saved):
+    """Assemble viewer context for the lighting adjustment page."""
+    tiles = group['channels'][0]['tiles']
+    positions = manifest['positions_zyx'] if manifest else group['stage_positions']
+    defaults = [1.0] * len(tiles)
+    saved_by_name = {channel['name']: channel['gains']
+                     for channel in (saved or {}).get('channels', [])}
+    return {
+        'name': group['name'], 'rows': group['rows'], 'cols': group['cols'],
+        'channels': [channel['name'] for channel in group['channels']],
+        'gains': [saved_by_name.get(channel['name'], defaults)
+                  for channel in group['channels']],
+        'arms': [_tile_arm(tile) for tile in tiles],
+        'gain_limits': [GAIN_MIN, GAIN_MAX],
+        'saved': saved is not None, 'positions_zyx': positions,
+        'z_count': tiles[0]['levels'][0]['shape'][-3], 'tile_size': TILE_SIZE,
+        'contrast': _contrast(tiles),
+        'tiles': [{'number': i, 'levels': [
+            {'width': level['shape'][-1], 'height': level['shape'][-2]}
+            for level in reversed(tile['levels'])
+        ]} for i, tile in enumerate(tiles)],
+    }
+
+
+def _valid_gains(gains, count):
+    return (isinstance(gains, list) and len(gains) == count
+            and all(type(v) in (int, float) and math.isfinite(v)
+                    and GAIN_MIN <= v <= GAIN_MAX for v in gains))
+
+
+def load_gains(root, group):
+    """Return the saved brightness gains for this acquisition, or None."""
+    path = root / 'gain.json'
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(data, dict) or data.get('acquisition') != group['name']:
+            return None
+        channels = data.get('channels')
+        if not isinstance(channels, list) or len(channels) != len(group['channels']):
+            return None
+        for channel, expected in zip(channels, group['channels']):
+            if (not isinstance(channel, dict)
+                    or channel.get('name') != expected['name']
+                    or not _valid_gains(channel.get('gains'), len(expected['tiles']))):
+                return None
+        return {'acquisition': group['name'], 'channels': [
+            {'name': channel['name'], 'gains': [float(v) for v in channel['gains']]}
+            for channel in channels
+        ]}
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def save_gains(root, group, channels):
+    """Save per-tile brightness gains for later gain correction."""
+    if not isinstance(channels, list) or len(channels) != len(group['channels']):
+        raise MosaicError('Expected one gain list per channel.')
+    data = {'acquisition': group['name'], 'channels': []}
+    for channel, expected in zip(channels, group['channels']):
+        if (not isinstance(channel, dict)
+                or channel.get('name') != expected['name']
+                or not _valid_gains(channel.get('gains'), len(expected['tiles']))):
+            raise MosaicError(f'Expected one positive gain per tile for {expected["name"]}.')
+        data['channels'].append({'name': expected['name'],
+                                 'gains': [float(v) for v in channel['gains']]})
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=root,
+                                         prefix='.gain-', suffix='.json',
+                                         delete=False) as output:
+            temp = output.name
+            json.dump(data, output, indent=2, allow_nan=False)
+            output.write('\n')
+        os.replace(temp, root / 'gain.json')
+    finally:
+        if temp and os.path.exists(temp):
+            os.unlink(temp)
+    return root / 'gain.json'
+
+
 @lru_cache(maxsize=4)
 def _image_plane(path, level, z):
     import numpy as np
@@ -336,11 +447,15 @@ def _image_plane(path, level, z):
     return np.asarray(array[(0,) * (ndim - 3) + (z, slice(None), slice(None))])
 
 
-def render_patch(group, tile_index, level_index, col, row, base_z, low, high):
+def render_patch(group, tile_index, level_index, col, row, base_z, low, high,
+                 channel_index=0, gain=1.0):
     import numpy as np
     from PIL import Image
 
-    tiles = group['channels'][0]['tiles']
+    channels = group['channels']
+    if not 0 <= channel_index < len(channels):
+        raise MosaicError('Channel index out of range.')
+    tiles = channels[channel_index]['tiles']
     if not 0 <= tile_index < len(tiles):
         raise MosaicError('Tile index out of range.')
     tile = tiles[tile_index]
@@ -350,11 +465,13 @@ def render_patch(group, tile_index, level_index, col, row, base_z, low, high):
     level = levels[-1 - level_index]
     width, height = level['shape'][-1], level['shape'][-2]
     x, y = col * TILE_SIZE, row * TILE_SIZE
-    reference = tiles[0]['levels'][0]
+    reference = group['channels'][0]['tiles'][0]['levels'][0]
     if not 0 <= base_z < reference['shape'][-3] or x >= width or y >= height:
         raise MosaicError('Z-plane or image patch out of range.')
     if not all(math.isfinite(v) for v in (low, high)) or high <= low:
         raise MosaicError('Invalid contrast limits.')
+    if not math.isfinite(gain) or not GAIN_MIN <= gain <= GAIN_MAX:
+        raise MosaicError('Invalid brightness gain.')
     dtype = np.dtype(tile['dtype'])
     limits = np.iinfo(dtype) if dtype.kind in 'iu' else None
     if limits and (low < limits.min or high > limits.max):
@@ -371,7 +488,7 @@ def render_patch(group, tile_index, level_index, col, row, base_z, low, high):
                 y:y + TILE_SIZE, x:x + TILE_SIZE
             ]
         pixels = np.nan_to_num(pixels, nan=low, posinf=high, neginf=low)
-        pixels = (np.clip((pixels.astype('float32') - low) * (255 / (high - low)), 0, 255)
+        pixels = (np.clip((pixels.astype('float32') * gain - low) * (255 / (high - low)), 0, 255)
                   .astype('uint8'))
     from io import BytesIO
 

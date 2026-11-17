@@ -13,8 +13,9 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 import settings
 from auth import setup_auth
 from forms import DatasetForm
-from mosaic import (MosaicError, dataset_directory, list_acquisitions, load_group,
-                    render_patch, save_positions, view_data)
+from mosaic import (MosaicError, brightness_data, dataset_directory, list_acquisitions,
+                    load_gains, load_group, render_patch, save_gains, save_positions,
+                    view_data)
 from models import CLNumber, db, Dataset, PI
 
 app = Flask(__name__)
@@ -29,10 +30,15 @@ db.init_app(app)
 
 MOSAIC_TOKEN_SALT = 'mosaic-positions'
 MOSAIC_TOKEN_MAX_AGE = 24 * 60 * 60
+BRIGHTNESS_TOKEN_SALT = 'mosaic-brightness'
 
 
 def mosaic_token_serializer():
     return URLSafeTimedSerializer(app.secret_key, salt=MOSAIC_TOKEN_SALT)
+
+
+def brightness_token_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt=BRIGHTNESS_TOKEN_SALT)
 
 
 def move_job_base_name(dataset):
@@ -255,6 +261,76 @@ def save_mosaic_positions(dataset_id, acquisition):
     except OSError as exc:
         return jsonify(error=f'Could not save mosaic.json: {exc}'), 500
     return jsonify(message=f'Saved positions to {path}.')
+
+
+@app.route('/datasets/<int:dataset_id>/brightness')
+@login_required
+def brightness_view(dataset_id):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        root = dataset_directory(dataset)
+        acquisitions = list_acquisitions(root)
+        if not acquisitions:
+            raise MosaicError('No MesoSPIM OME-Zarr 0.4 acquisitions were found.')
+        acquisition = request.args.get('acquisition', default=0, type=int)
+        group, manifest = load_group(root, acquisition)
+        data = brightness_data(group, manifest, load_gains(root, group))
+    except MosaicError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+    token = brightness_token_serializer().dumps(
+        [current_user.get_id(), dataset_id, acquisition]
+    )
+    return render_template('brightness_view.html', dataset=dataset, data=data,
+                           acquisitions=[str(p.relative_to(root)) for p in acquisitions],
+                           acquisition=acquisition, csrf_token=token)
+
+
+@app.route('/datasets/<int:dataset_id>/brightness/tiles/<int:acquisition>/'
+           '<int:channel_index>/<int:tile_index>/<int:level_index>/<int:col>/<int:row>.png')
+@login_required
+def brightness_patch(dataset_id, acquisition, channel_index, tile_index, level_index, col, row):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        root = dataset_directory(dataset)
+        group, _ = load_group(root, acquisition)
+        z = int(request.args['z'])
+        low = float(request.args['lo'])
+        high = float(request.args['hi'])
+        gain = float(request.args.get('gain', 1.0))
+        image = render_patch(group, tile_index, level_index, col, row, z, low, high,
+                             channel_index=channel_index, gain=gain)
+    except (MosaicError, ValueError, KeyError) as exc:
+        abort(400, description=str(exc))
+    return Response(image, mimetype='image/png',
+                    headers={'Cache-Control': 'private, max-age=60'})
+
+
+@app.route('/datasets/<int:dataset_id>/brightness/<int:acquisition>', methods=['POST'])
+@login_required
+def save_brightness(dataset_id, acquisition):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        token_data = brightness_token_serializer().loads(
+            request.headers.get('X-CSRF-Token', ''),
+            max_age=MOSAIC_TOKEN_MAX_AGE,
+        )
+    except BadSignature:
+        return jsonify(error='Save authorization expired or invalid. Reopen the viewer.'), 403
+    if token_data != [current_user.get_id(), dataset_id, acquisition]:
+        return jsonify(error='Save authorization does not match this dataset.'), 403
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        abort(400, description='Expected JSON with channels.')
+    try:
+        root = dataset_directory(dataset)
+        group, _ = load_group(root, acquisition)
+        path = save_gains(root, group, body.get('channels'))
+    except MosaicError as exc:
+        return jsonify(error=str(exc)), 400
+    except OSError as exc:
+        return jsonify(error=f'Could not save gain.json: {exc}'), 500
+    return jsonify(message=f'Saved brightness adjustments to {path}.')
 
 
 @app.route('/datasets/<int:dataset_id>/restart', methods=['POST'])
