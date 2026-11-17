@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='mosaic.css') }}">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h2 class="mb-1">Align OME-Zarr tiles: {{ dataset.name }}</h2>
+        <a href="{{ url_for('edit_dataset', dataset_id=dataset.id) }}">Back to dataset</a>
+    </div>
+    <button id="save-positions" type="button" class="btn btn-primary">Save positions</button>
+</div>
+{% if acquisitions|length > 1 %}
+<div class="mb-3">
+    <label for="acquisition" class="form-label">Acquisition</label>
+    <select id="acquisition" class="form-select">
+        {% for name in acquisitions %}
+        <option value="{{ loop.index0 }}" {% if loop.index0 == acquisition %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+</div>
+{% else %}
+<p class="small text-muted">{{ data.name }}</p>
+{% endif %}
+<div class="row g-3 align-items-end mb-3">
+    <div class="col-md-5">
+        <label for="z-plane" class="form-label">Z-plane: <span id="z-value"></span></label>
+        <input id="z-plane" class="form-range" type="range" min="0" max="{{ data.z_count - 1 }}" value="{{ data.z_count // 2 }}">
+    </div>
+    <div class="col-md-5">
+        <label class="form-label" for="contrast-low">Contrast: <span id="contrast-value"></span></label>
+        <div class="contrast-slider">
+            <input id="contrast-low" type="range" aria-label="Lower contrast limit">
+            <input id="contrast-high" type="range" aria-label="Upper contrast limit">
+        </div>
+    </div>
+    <div class="col-md-2">
+        <button type="button" id="zoom-in" class="btn btn-outline-secondary" aria-label="Zoom in">+</button>
+        <button type="button" id="zoom-out" class="btn btn-outline-secondary" aria-label="Zoom out">−</button>
+    </div>
+</div>
+<p class="small mb-2">{{ data.rows }} rows × {{ data.cols }} columns · Displaying {{ data.channels[0] }}{% if data.channels|length > 1 %} (positions will apply to all {{ data.channels|length }} channels){% endif %}. Arrow buttons move one highest-resolution pixel; hold Shift for 10 pixels. Scroll to zoom.</p>
+<div class="d-flex align-items-center gap-2 mb-2">
+    <span class="small">Mouse drag:</span>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Mouse drag mode">
+        <button id="pan-mode" type="button" class="btn btn-outline-primary active" aria-pressed="true">Pan</button>
+        <button id="move-mode" type="button" class="btn btn-outline-primary" aria-pressed="false">Move tiles</button>
+    </div>
+    <span class="small text-muted">In Move mode, drag a tile to reposition it; drag the background to pan.</span>
+</div>
+<div id="viewer-status" role="status" aria-live="polite" class="mb-2"></div>
+<div id="tile-viewer" aria-label="MesoSPIM tile alignment viewer"></div>
+<script id="mosaic-config" type="application/json">{{ {
+    'data': data,
+    'image_root': url_for('mosaic_view', dataset_id=dataset.id) ~ '/tiles/' ~ acquisition,
+    'save_url': url_for('save_mosaic_positions', dataset_id=dataset.id, acquisition=acquisition),
+    'viewer_url': url_for('mosaic_view', dataset_id=dataset.id),
+    'csrf_token': csrf_token
+}|tojson }}</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+<script defer src="{{ url_for('static', filename='mosaic.js') }}"></script>
+{% endblock %}

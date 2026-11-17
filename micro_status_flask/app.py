@@ -5,16 +5,16 @@ import sqlite3
 import subprocess
 from datetime import datetime, timedelta
 
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import (Flask, Response, abort, flash, jsonify, redirect,
+                   render_template, request, url_for)
 from flask_login import login_required, current_user
-from flask_sqlalchemy import SQLAlchemy
-from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField
-from wtforms.validators import DataRequired
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import settings
-from auth import setup_auth, user_info
+from auth import setup_auth
 from forms import DatasetForm
+from mosaic import (MosaicError, dataset_directory, list_acquisitions, load_group,
+                    render_patch, save_positions, view_data)
 from models import CLNumber, db, Dataset, PI
 
 app = Flask(__name__)
@@ -26,6 +26,13 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your-secret-key'
 
 db.init_app(app)
+
+MOSAIC_TOKEN_SALT = 'mosaic-positions'
+MOSAIC_TOKEN_MAX_AGE = 24 * 60 * 60
+
+
+def mosaic_token_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt=MOSAIC_TOKEN_SALT)
 
 
 def move_job_base_name(dataset):
@@ -166,7 +173,88 @@ def edit_dataset(dataset_id):
         flash("Dataset updated successfully.", "success")
         return redirect(url_for('index'))  # or wherever your list route is
 
-    return render_template('edit_dataset.html', form=form, dataset=dataset)
+    show_mosaic = False
+    if (dataset.modality or '').lower() == 'mesospim':
+        try:
+            show_mosaic = bool(list_acquisitions(dataset_directory(dataset)))
+        except (MosaicError, OSError):
+            pass
+    return render_template('edit_dataset.html', form=form, dataset=dataset,
+                           show_mosaic=show_mosaic)
+
+
+def mosaic_dataset(dataset_id):
+    dataset = Dataset.query.get_or_404(dataset_id)
+    if (dataset.modality or '').lower() != 'mesospim':
+        abort(404)
+    return dataset
+
+
+@app.route('/datasets/<int:dataset_id>/mosaic')
+@login_required
+def mosaic_view(dataset_id):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        root = dataset_directory(dataset)
+        acquisitions = list_acquisitions(root)
+        if not acquisitions:
+            raise MosaicError('No MesoSPIM OME-Zarr 0.4 acquisitions were found.')
+        acquisition = request.args.get('acquisition', default=0, type=int)
+        group, manifest = load_group(root, acquisition)
+        data = view_data(root, group, manifest)
+    except MosaicError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+    token = mosaic_token_serializer().dumps(
+        [current_user.get_id(), dataset_id, acquisition]
+    )
+    return render_template('mosaic_view.html', dataset=dataset, data=data,
+                           acquisitions=[str(p.relative_to(root)) for p in acquisitions],
+                           acquisition=acquisition, csrf_token=token)
+
+
+@app.route('/datasets/<int:dataset_id>/mosaic/tiles/<int:acquisition>/<int:tile_index>/<int:level_index>/<int:col>/<int:row>.png')
+@login_required
+def mosaic_patch(dataset_id, acquisition, tile_index, level_index, col, row):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        root = dataset_directory(dataset)
+        group, _ = load_group(root, acquisition)
+        z = int(request.args['z'])
+        low = float(request.args['lo'])
+        high = float(request.args['hi'])
+        image = render_patch(group, tile_index, level_index, col, row, z, low, high)
+    except (MosaicError, ValueError, KeyError) as exc:
+        abort(400, description=str(exc))
+    return Response(image, mimetype='image/png',
+                    headers={'Cache-Control': 'private, max-age=60'})
+
+
+@app.route('/datasets/<int:dataset_id>/mosaic/positions/<int:acquisition>', methods=['POST'])
+@login_required
+def save_mosaic_positions(dataset_id, acquisition):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        token_data = mosaic_token_serializer().loads(
+            request.headers.get('X-CSRF-Token', ''),
+            max_age=MOSAIC_TOKEN_MAX_AGE,
+        )
+    except BadSignature:
+        return jsonify(error='Save authorization expired or invalid. Reopen the viewer.'), 403
+    if token_data != [current_user.get_id(), dataset_id, acquisition]:
+        return jsonify(error='Save authorization does not match this dataset.'), 403
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        abort(400, description='Expected JSON with positions_zyx.')
+    try:
+        root = dataset_directory(dataset)
+        group, _ = load_group(root, acquisition)
+        path = save_positions(root, group, body.get('positions_zyx'))
+    except MosaicError as exc:
+        return jsonify(error=str(exc)), 400
+    except OSError as exc:
+        return jsonify(error=f'Could not save mosaic.json: {exc}'), 500
+    return jsonify(message=f'Saved positions to {path}.')
 
 
 @app.route('/datasets/<int:dataset_id>/restart', methods=['POST'])
