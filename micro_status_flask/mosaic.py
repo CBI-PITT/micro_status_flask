@@ -188,6 +188,15 @@ def _layout(tiles):
     ref = first['translation']
     positions = [[_round((tile['levels'][0]['translation'][j] - ref[j]) / scale[j])
                   for j in range(3)] for tile in tiles]
+    # Canonicalize orientation: tile 0 top-left, rows down, columns right,
+    # following the column-major tile numbering (as validate_tiles.py does),
+    # regardless of the stage sweep direction along y and x.
+    if rows > 1 and tiles[1]['levels'][0]['translation'][1] < first['translation'][1]:
+        for position in positions:
+            position[1] = -position[1]
+    if cols > 1 and tiles[rows]['levels'][0]['translation'][2] < first['translation'][2]:
+        for position in positions:
+            position[2] = -position[2]
     return rows, cols, positions
 
 
@@ -271,13 +280,16 @@ def _group(root, acquisition):
         raise MosaicError('No MesoSPIM OME-Zarr tiles found.')
     tiles = channels[0]['tiles']
     rows, cols, stage_positions = _layout(tiles)
-    signature = [(tile['levels'][0]['shape'][-3:], tile['axes'], tile['dtype'],
+    # Tiles may differ in z-plane count (acquisitions stopped and resumed);
+    # y/x sizes, axes, pixel type and level-0 voxel scale must still match.
+    signature = [(tile['levels'][0]['shape'][-2:], tile['axes'], tile['dtype'],
                   tile['levels'][0]['scale']) for tile in tiles]
     if any(entry != signature[0] for entry in signature):
-        raise MosaicError('Tile shapes, axes, types and level-0 voxel sizes must match.')
+        raise MosaicError('Tile sizes (z depth may differ), axes, types and '
+                          'level-0 voxel sizes must match.')
     for channel in channels[1:]:
         if len(channel['tiles']) != len(tiles) or any(
-            (other['levels'][0]['shape'][-3:], other['axes'], other['dtype'],
+            (other['levels'][0]['shape'][-2:], other['axes'], other['dtype'],
              other['levels'][0]['scale']) != signature[0]
             for other in channel['tiles']
         ):
@@ -346,7 +358,8 @@ def view_data(root, group, manifest):
         'name': group['name'], 'rows': group['rows'], 'cols': group['cols'],
         'channels': [channel['name'] for channel in group['channels']],
         'saved': manifest is not None, 'positions_zyx': positions,
-        'z_count': tiles[0]['levels'][0]['shape'][-3], 'tile_size': TILE_SIZE,
+        'z_count': max(tile['levels'][0]['shape'][-3] for tile in tiles),
+        'tile_size': TILE_SIZE,
         'contrast': _contrast(tiles),
         'tiles': [{'number': i, 'levels': [
             {'width': level['shape'][-1], 'height': level['shape'][-2]}
@@ -370,7 +383,9 @@ def brightness_data(group, manifest, saved):
         'arms': [_tile_arm(tile) for tile in tiles],
         'gain_limits': [GAIN_MIN, GAIN_MAX],
         'saved': saved is not None, 'positions_zyx': positions,
-        'z_count': tiles[0]['levels'][0]['shape'][-3], 'tile_size': TILE_SIZE,
+        'z_count': max(tile['levels'][0]['shape'][-3] for channel in group['channels']
+                       for tile in channel['tiles']),
+        'tile_size': TILE_SIZE,
         'contrast': _contrast(tiles),
         'tiles': [{'number': i, 'levels': [
             {'width': level['shape'][-1], 'height': level['shape'][-2]}
@@ -466,7 +481,8 @@ def render_patch(group, tile_index, level_index, col, row, base_z, low, high,
     width, height = level['shape'][-1], level['shape'][-2]
     x, y = col * TILE_SIZE, row * TILE_SIZE
     reference = group['channels'][0]['tiles'][0]['levels'][0]
-    if not 0 <= base_z < reference['shape'][-3] or x >= width or y >= height:
+    z_count = max(tile['levels'][0]['shape'][-3] for tile in group['channels'][0]['tiles'])
+    if not 0 <= base_z < z_count or x >= width or y >= height:
         raise MosaicError('Z-plane or image patch out of range.')
     if not all(math.isfinite(v) for v in (low, high)) or high <= low:
         raise MosaicError('Invalid contrast limits.')

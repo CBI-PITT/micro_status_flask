@@ -53,7 +53,7 @@ def test_stage_geometry_and_shared_channel_manifest(dataset):
     assert (group['rows'], group['cols']) == (2, 2)
     assert [channel['name'] for channel in group['channels']] == ['Ch488', 'Ch561']
     assert group['stage_positions'] == [
-        [0, 0, 0], [0, -12, 0], [0, 0, -12], [0, -12, -12]
+        [0, 0, 0], [0, 12, 0], [0, 0, 12], [0, 12, 12]
     ]
 
     positions = [p.copy() for p in group['stage_positions']]

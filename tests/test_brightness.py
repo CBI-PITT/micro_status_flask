@@ -14,9 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'micro_status_flask
 import mosaic
 
 
-@pytest.fixture
-def dataset(tmp_path):
-    acquisition = tmp_path / 'scan.ome.zarr'
+def _build_dataset(root, short_tiles=(), y_sign=-1, x_sign=-1):
+    acquisition = root / 'scan.ome.zarr'
     acquisition.mkdir()
     for channel, offset in (('488', 0), ('561', 50)):
         for number in range(4):
@@ -25,10 +24,11 @@ def dataset(tmp_path):
                 group = zarr.open_group(str(tile), mode='w', zarr_format=2)
             except TypeError:
                 group = zarr.open_group(str(tile), mode='w')
-            y, x = -12 * (number % 2), -12 * (number // 2)
+            z_planes = 4 if number in short_tiles else 5
+            y, x = y_sign * 12 * (number % 2), x_sign * 12 * (number // 2)
             levels = []
-            for i, (shape, scale) in enumerate((((5, 16, 16), (1, 1, 1)),
-                                                 ((3, 8, 8), (2, 2, 2)))):
+            for i, (shape, scale) in enumerate((((z_planes, 16, 16), (1, 1, 1)),
+                                                 (((z_planes + 1) // 2, 8, 8), (2, 2, 2)))):
                 array = group.create_dataset(str(i), shape=shape, dtype='uint16',
                                              chunks=(2, 8, 8))
                 for z in range(shape[0]):
@@ -48,7 +48,17 @@ def dataset(tmp_path):
                 f'[Shutter] {"Left" if number % 2 == 0 else "Right"}\n',
                 encoding='utf-8',
             )
-    return tmp_path
+    return root
+
+
+@pytest.fixture
+def dataset(tmp_path):
+    return _build_dataset(tmp_path)
+
+
+@pytest.fixture
+def short_dataset(tmp_path):
+    return _build_dataset(tmp_path, short_tiles=(2,))
 
 
 def test_arms_read_from_meta_files(dataset):
@@ -68,6 +78,51 @@ def test_brightness_view_defaults(dataset):
     assert view['gain_limits'] == [mosaic.GAIN_MIN, mosaic.GAIN_MAX]
     assert view['z_count'] == 5
     assert (view['rows'], view['cols']) == (2, 2)
+
+
+def test_tiles_with_different_z_counts_load_and_render(short_dataset):
+    group, _ = mosaic.load_group(short_dataset, 0)
+    assert (group['rows'], group['cols']) == (2, 2)
+    view = mosaic.brightness_data(group, None, None)
+    assert view['z_count'] == 5
+    assert view['arms'] == ['L', 'R', 'L', 'R']
+    assert mosaic.load_group(short_dataset, 0)[1] is None
+    gains = [{'name': 'Ch488', 'gains': [1.0, 1.1, 0.9, 1.0]},
+             {'name': 'Ch561', 'gains': [1.0] * 4}]
+    mosaic.save_gains(short_dataset, group, gains)
+    assert mosaic.load_gains(short_dataset, group)['channels'][0]['gains'] == gains[0]['gains']
+
+    # Tile 2 has 4 planes: base_z=4 renders black for it, normally for tile 0.
+    black = Image.open(BytesIO(mosaic.render_patch(group, 2, 0, 0, 0, 4, 0, 500)))
+    assert black.getextrema() == (0, 0)
+    last = Image.open(BytesIO(mosaic.render_patch(group, 0, 0, 0, 0, 4, 0, 500)))
+    assert last.getpixel((0, 0)) == (100 + 40) * 255 // 500
+    with pytest.raises(mosaic.MosaicError, match='Z-plane'):
+        mosaic.render_patch(group, 0, 0, 0, 0, 5, 0, 500)
+
+
+def test_rejects_tiles_with_different_yx_sizes(tmp_path):
+    _build_dataset(tmp_path)
+    tile = tmp_path / 'scan.ome.zarr' / 'Mag8_Tile3_Ch488_Sh0.ome.zarr'
+    for level, shape in (('0', (5, 12, 16)), ('1', (3, 6, 8))):
+        array = zarr.open_array(str(tile / level), mode='r+')
+        array.resize(shape)
+    with pytest.raises(mosaic.MosaicError, match='Tile sizes'):
+        mosaic.load_group(tmp_path, 0)
+
+
+def test_stage_positions_canonicalized_regardless_of_sweep_direction(tmp_path):
+    # Like the real 111226 dataset (+y rows, -x columns), plus both-increasing
+    # and y-decreasing sweeps: display positions always grow down and right.
+    for y_sign, x_sign in ((1, -1), (1, 1), (-1, 1)):
+        root = tmp_path / f'ds_{y_sign}_{x_sign}'
+        root.mkdir()
+        _build_dataset(root, y_sign=y_sign, x_sign=x_sign)
+        group, _ = mosaic.load_group(root, 0)
+        assert (group['rows'], group['cols']) == (2, 2)
+        assert group['stage_positions'] == [
+            [0, 0, 0], [0, 12, 0], [0, 0, 12], [0, 12, 12]
+        ]
 
 
 def test_gain_save_and_load_roundtrip(dataset):
