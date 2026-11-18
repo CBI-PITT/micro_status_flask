@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='mosaic.css') }}">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h2 class="mb-1">Adjust MesoSPIM lighting: {{ dataset.name }}</h2>
+        <a href="{{ url_for('edit_dataset', dataset_id=dataset.id) }}">Back to dataset</a>
+    </div>
+    <button id="save-gains" type="button" class="btn btn-primary">Save adjustments</button>
+</div>
+{% if acquisitions|length > 1 %}
+<div class="mb-3">
+    <label for="acquisition" class="form-label">Acquisition</label>
+    <select id="acquisition" class="form-select">
+        {% for name in acquisitions %}
+        <option value="{{ loop.index0 }}" {% if loop.index0 == acquisition %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+</div>
+{% else %}
+<p class="small text-muted">{{ data.name }}</p>
+{% endif %}
+<div class="mb-3">
+    <label for="channel" class="form-label">Channel</label>
+    <select id="channel" class="form-select">
+        {% for name in data.channels %}
+        <option value="{{ loop.index0 }}" {% if loop.index0 == 0 %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="row g-3 align-items-end mb-3">
+    <div class="col-md-5">
+        <label for="z-plane" class="form-label">Z-plane: <span id="z-value"></span></label>
+        <input id="z-plane" class="form-range" type="range" min="0" max="{{ data.z_count - 1 }}" value="{{ data.z_count // 2 }}">
+    </div>
+    <div class="col-md-5">
+        <label class="form-label" for="contrast-low">Contrast: <span id="contrast-value"></span></label>
+        <div class="contrast-slider">
+            <input id="contrast-low" type="range" aria-label="Lower contrast limit">
+            <input id="contrast-high" type="range" aria-label="Upper contrast limit">
+        </div>
+    </div>
+    <div class="col-md-2">
+        <button type="button" id="zoom-in" class="btn btn-outline-secondary" aria-label="Zoom in">+</button>
+        <button type="button" id="zoom-out" class="btn btn-outline-secondary" aria-label="Zoom out">−</button>
+    </div>
+</div>
+<p class="small mb-2">{{ data.rows }} rows × {{ data.cols }} columns · L and R badges mark the acquisition arm recorded in each tile's _meta.txt file. + brightens and − darkens the tile ×1.1 per click (hold Shift for ×1.61). Scroll to zoom.</p>
+<div id="viewer-status" role="status" aria-live="polite" class="mb-2"></div>
+<div id="tile-viewer" aria-label="MesoSPIM lighting adjustment viewer"></div>
+<script id="brightness-config" type="application/json">{{ {
+    'data': data,
+    'image_root': url_for('brightness_view', dataset_id=dataset.id) ~ '/tiles/' ~ acquisition,
+    'save_url': url_for('save_brightness', dataset_id=dataset.id, acquisition=acquisition),
+    'viewer_url': url_for('brightness_view', dataset_id=dataset.id),
+    'csrf_token': csrf_token
+}|tojson }}</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.1/openseadragon.min.js"></script>
+<script defer src="{{ url_for('static', filename='brightness.js') }}"></script>
+{% endblock %}

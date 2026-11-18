@@ -90,3 +90,59 @@
 .tile-arrows .number { grid-column: 2; grid-row: 2; }
 .tile-arrows .right { grid-column: 3; grid-row: 2; }
 .tile-arrows .down { grid-column: 2; grid-row: 3; }
+
+.tile-gain {
+    /* OpenSeadragon sets display:block inline when it positions overlays. */
+    display: grid !important;
+    grid-template-columns: repeat(3, 26px);
+    grid-template-rows: repeat(2, 24px);
+    place-items: center;
+    color: white;
+    font-size: 12px;
+    text-shadow: 0 0 3px black;
+    user-select: none;
+}
+
+.tile-gain.is-hidden {
+    display: none !important;
+}
+
+.tile-gain button {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    color: white;
+    background: #164c80d9;
+    border: 1px solid white;
+    border-radius: 4px;
+    line-height: 20px;
+}
+
+.tile-gain button:hover, .tile-gain button:focus {
+    background: #0d6efd;
+}
+
+.tile-gain .number {
+    grid-column: 1 / span 2;
+    grid-row: 1;
+    justify-self: end;
+    font-weight: 600;
+}
+
+.tile-gain .arm {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 4px;
+    border: 1px solid white;
+    border-radius: 8px;
+}
+
+.tile-gain .arm.left { background: #0f6e5c; }
+.tile-gain .arm.right { background: #8a5a00; }
+.tile-gain .arm.unknown { background: #555555; }
+
+.tile-gain .dimmer { grid-column: 1; grid-row: 2; }
+.tile-gain .multiplier { grid-column: 2; grid-row: 2; font-size: 10px; }
+.tile-gain .brighter { grid-column: 3; grid-row: 2; }

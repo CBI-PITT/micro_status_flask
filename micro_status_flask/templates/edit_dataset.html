@@ -35,6 +35,7 @@
         </form>
         {% if show_mosaic %}
             <a class="btn btn-info" href="{{ url_for('mosaic_view', dataset_id=dataset.id) }}">Align OME-Zarr tiles</a>
+            <a class="btn btn-info" href="{{ url_for('brightness_view', dataset_id=dataset.id) }}">Adjust lighting</a>
         {% endif %}
     </div>
 </div>
