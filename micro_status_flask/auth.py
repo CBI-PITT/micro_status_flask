@@ -1,5 +1,6 @@
 import time
-from flask import (render_template,
+from flask import (current_app,
+                   render_template,
                    request,
                    flash,
                    redirect,
@@ -149,6 +150,7 @@ def domain_auth(user_name, password, domain_server=r"ldap://cbilab.pitt.edu:389"
     '''
 
     from ldap3 import Server, Connection, ALL, NTLM
+    from ldap3.core.exceptions import LDAPException
 
     user = domain + "\\" + user_name
 
@@ -166,7 +168,10 @@ def domain_auth(user_name, password, domain_server=r"ldap://cbilab.pitt.edu:389"
         else:
             print('Authentication Failed')
             return False
-    except:
-        print('An error occured while connecting to the domain server')
+    except (LDAPException, OSError, ValueError, ImportError) as exc:
+        detail = str(exc)
+        if isinstance(password, str) and password:
+            detail = detail.replace(password, '[redacted]')
+        current_app.logger.error('LDAP authentication failed (%s): %s',
+                                 type(exc).__name__, detail)
         return None
-

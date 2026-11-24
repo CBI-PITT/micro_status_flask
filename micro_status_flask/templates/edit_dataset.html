@@ -36,6 +36,10 @@
         {% if show_mosaic %}
             <a class="btn btn-info" href="{{ url_for('mosaic_view', dataset_id=dataset.id) }}">Align OME-Zarr tiles</a>
             <a class="btn btn-info" href="{{ url_for('brightness_view', dataset_id=dataset.id) }}">Adjust lighting</a>
+            <form method="POST" action="{{ url_for('open_virtual_stitched', dataset_id=dataset.id) }}" target="_blank">
+                <input type="hidden" name="token" value="{{ virtual_zarr_token }}">
+                <button type="submit" class="btn btn-info">View virtually stitched tiles</button>
+            </form>
         {% endif %}
     </div>
 </div>

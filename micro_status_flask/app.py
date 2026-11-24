@@ -1,8 +1,12 @@
+import base64
+import hashlib
+import hmac
 import os
 import re
 import shlex
 import sqlite3
 import subprocess
+import time
 from datetime import datetime, timedelta
 
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
@@ -24,13 +28,14 @@ app, login_manager = setup_auth(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'your-secret-key'
 
 db.init_app(app)
 
 MOSAIC_TOKEN_SALT = 'mosaic-positions'
 MOSAIC_TOKEN_MAX_AGE = 24 * 60 * 60
 BRIGHTNESS_TOKEN_SALT = 'mosaic-brightness'
+VIRTUAL_ZARR_TOKEN_SALT = 'virtual-zarr-viewer'
+VIRTUAL_ZARR_TOKEN_MAX_AGE = 24 * 60 * 60
 
 
 def mosaic_token_serializer():
@@ -39,6 +44,24 @@ def mosaic_token_serializer():
 
 def brightness_token_serializer():
     return URLSafeTimedSerializer(app.secret_key, salt=BRIGHTNESS_TOKEN_SALT)
+
+
+def virtual_zarr_token_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt=VIRTUAL_ZARR_TOKEN_SALT)
+
+
+def virtual_zarr_data_token(dataset_id, path):
+    """Expiring per-dataset access token for the virtual Zarr service.
+
+    HMAC format shared with mesospim_virtual_zarr.service.verify_token; the
+    service must be started with the same secret as this app's secret key.
+    """
+    expiry = int(time.time()) + VIRTUAL_ZARR_TOKEN_MAX_AGE
+    payload = f"{dataset_id}|{expiry}|{path}"
+    signature = hmac.new(app.secret_key.encode('utf-8'), payload.encode('utf-8'),
+                         hashlib.sha256).hexdigest()
+    encoded = base64.urlsafe_b64encode(payload.encode('utf-8')).decode('ascii')
+    return f"{encoded}.{signature}"
 
 
 def move_job_base_name(dataset):
@@ -186,7 +209,9 @@ def edit_dataset(dataset_id):
         except (MosaicError, OSError):
             pass
     return render_template('edit_dataset.html', form=form, dataset=dataset,
-                           show_mosaic=show_mosaic)
+                           show_mosaic=show_mosaic,
+                           virtual_zarr_token=virtual_zarr_token_serializer().dumps(
+                               [current_user.get_id(), dataset_id]))
 
 
 def mosaic_dataset(dataset_id):
@@ -331,6 +356,45 @@ def save_brightness(dataset_id, acquisition):
     except OSError as exc:
         return jsonify(error=f'Could not save gain.json: {exc}'), 500
     return jsonify(message=f'Saved brightness adjustments to {path}.')
+
+
+@app.route('/datasets/<int:dataset_id>/virtual_stitched', methods=['POST'])
+@login_required
+def open_virtual_stitched(dataset_id):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        token_data = virtual_zarr_token_serializer().loads(
+            request.form.get('token', ''), max_age=VIRTUAL_ZARR_TOKEN_MAX_AGE)
+    except BadSignature:
+        abort(403, description='View authorization expired or invalid. Reload the edit page.')
+    if token_data != [current_user.get_id(), dataset_id]:
+        abort(403, description='View authorization does not match this dataset.')
+    try:
+        root = dataset_directory(dataset)
+        acquisitions = list_acquisitions(root)
+        if not acquisitions:
+            raise MosaicError('No MesoSPIM OME-Zarr 0.4 acquisitions were found.')
+        # Reuse the acquisition referenced by a valid mosaic.json; otherwise
+        # the first discovered acquisition, whose stage positions create the
+        # manifest on first use.
+        acquisition = 0
+        for index in range(len(acquisitions)):
+            _, manifest = load_group(root, index)
+            if manifest is not None:
+                acquisition = index
+                break
+        group, manifest = load_group(root, acquisition)
+        if manifest is None:
+            save_positions(root, group, group['stage_positions'])
+    except MosaicError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+    except OSError as exc:
+        flash(f'Could not prepare the virtual stitched store: {exc}', 'danger')
+        return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+    token = virtual_zarr_data_token(dataset_id, str(root))
+    return redirect(f"{settings.VIRTUAL_ZARR_SERVICE_PATH.rstrip('/')}/"
+                    f"datasets/{dataset_id}/viewer?token={token}")
 
 
 @app.route('/datasets/<int:dataset_id>/restart', methods=['POST'])
@@ -495,4 +559,6 @@ def create_dataset():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=1414)
+    from server import main
+
+    main(app)

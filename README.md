@@ -69,6 +69,7 @@ The **shared SQLite database is the contract between the two projects**:
 | `/datasets/<id>/restart` | Restart processing. MesoSPIM: submits `mesospim_utils` (`automated.py`) as a SLURM job (zarr input, `ims` final file). RSCM: writes a stitch-queue file under `RSCM_FOLDER_STITCHING/queueStitch`. |
 | `/datasets/<id>/move` | Move a dataset to `<HIVE_ROOT>`: generates an sbatch script (`rclone copy` → `rclone check` → source to trash, with complete/error markers) under `<FS_ROOT>/tmp/move_jobs`, submits it, sets `moving=1`. |
 | `/datasets/<id>/mosaic` | Align MesoSPIM OME-Zarr 0.4 tiles on a zoomable z-plane and save the positions in `mosaic.json` beside the dataset. |
+| `/datasets/<id>/virtual_stitched` | **View virtually stitched tiles**: prepares `mosaic.json` beside the dataset when missing (created from the stage positions; a valid existing manifest is reused) and opens the virtually stitched mosaic in Neuroglancer in a new tab (see below). |
 | `/login`, `/logout`, `/profile` | LDAP authentication (see below). |
 
 ## Authentication
@@ -85,6 +86,7 @@ The **shared SQLite database is the contract between the two projects**:
 | Path | Purpose |
 |---|---|
 | `micro_status_flask/app.py` | Flask app, routes, DB config, move/restart job generation |
+| `micro_status_flask/server.py` | Single-port ASGI entry point mounting Flask and the virtual-Zarr service |
 | `micro_status_flask/auth.py` | Login manager, LDAP auth, login/logout/profile routes, rate limiting |
 | `micro_status_flask/models.py` | SQLAlchemy models (`Dataset`, `PI`, `CLNumber`) mapping the existing schema |
 | `micro_status_flask/forms.py` | WTForms definitions (`DatasetForm`) |
@@ -92,6 +94,7 @@ The **shared SQLite database is the contract between the two projects**:
 | `micro_status_flask/static/mosaic.js` | Tile alignment controls and viewport-aware image loading |
 | `micro_status_flask/settings.py` | Paths shared with the bot (DB location, storage folders, move-jobs dir) |
 | `micro_status_flask/templates/` | Jinja templates |
+| `requirements-combined.txt` | Python 3.12 dependencies for both web apps and their tests |
 | `micro_status_flask/data.db` | Stale local artifact — the real DB is at `<FS_ROOT>/RSCM_MesoSPIM_datasets.db` |
 
 ## Database
@@ -110,23 +113,31 @@ The **shared SQLite database is the contract between the two projects**:
 
 ```bash
 ssh <USER>@<LOGIN_NODE>
-conda activate microstatus-flask
-cd micro_status_flask/micro_status_flask   # run from inside micro_status_flask/
+cd <path-to-micro_status_flask_test>  # repository root
+conda create -n microstatus-neuroglancer -y python=3.12 pip
+conda activate microstatus-neuroglancer
+python -m pip install -r requirements-combined.txt
+python -m pip install -e ../../mesospim_virtual_zarr_source/mesospim_virtual_zarr \
+                      -e ../../peace/flask_file_browser_test
+cd micro_status_flask
 python app.py
 ```
 
-The app is then available at **http://<LOGIN_NODE>:1414**.
+The dashboard is at **http://<LOGIN_NODE>:1414**, with the virtual-Zarr
+service and bundled Neuroglancer client on the same port under
+`/virtual-zarr/`. Only one process needs to be started. Keep the external
+`flask_file_browser/settings.ini` auth configuration available in the editable
+`flask_file_browser` source tree; it supplies the Flask session and viewer-token
+secret. The existing environments are not modified.
 
 Notes:
 
 - Start from **inside** `micro_status_flask/`: `app.py` imports sibling modules
   (`settings`, `auth`, `models`, `forms`) as top-level modules.
-- Dependencies (no `requirements.txt` is tracked): Flask, Flask-SQLAlchemy,
-  Flask-Login, Flask-WTF/WTForms, ldap3, flask-limiter, plus `flask_file_browser`
-  (used for the auth config, below).
-- Install the additional tile-viewer packages into that same environment with
-  `python -m pip install -r requirements-viewer.txt` from the repository root.
-  The existing `microstatus-flask` environment may not have NumPy, Pillow, or Zarr.
+- `requirements-combined.txt` covers the PyPI dependencies; the two local
+  editable installs above provide the mosaic engine and the existing auth config.
+- The separate `requirements-viewer.txt` only covers the older tile-alignment
+  viewer, not Neuroglancer or the combined server.
 - `python3 -m compileall micro_status_flask` is the safe syntax check.
 
 ## MesoSPIM OME-Zarr tile alignment
@@ -157,6 +168,41 @@ The largest level-0 chunks in the supplied example expand to roughly 550 MiB;
 image reads are serialized to keep concurrent zoom requests from multiplying
 that memory usage.
 
+## Virtual stitched tiles in Neuroglancer
+
+On a MesoSPIM dataset's edit page, select **View virtually stitched tiles**
+(shown whenever OME-Zarr tiles are discovered). The route creates
+`mosaic.json` beside the dataset from the stage positions when it is missing
+(a valid existing manifest, including manual positions and per-channel colors,
+is reused, never silently replaced) and opens a new tab with the virtually
+stitched mosaic in Neuroglancer: a zoomed-out single-panel (XY) view showing
+the whole dataset at a coarse pyramid level, one image layer per channel, an
+initial position on the middle z/y/x plane of the volume and per-channel
+display windows.
+
+The new tab is served by [`mesospim_virtual_zarr`](../../mesospim_virtual_zarr_source/mesospim_virtual_zarr/)
+inside the same Python 3.12 process as Flask. `server.py` mounts its FastAPI
+app at `/virtual-zarr` and mounts Flask at `/`; Uvicorn serves both on port 1414.
+
+- `VIRTUAL_ZARR_SERVICE_PATH` in `micro_status_flask/settings.py` is the
+  same-origin mount path, not an address on another port.
+- The viewer and chunk requests carry an expiring per-dataset token signed with
+  this app's auth-configured secret key; the service uses that same key to verify
+  tokens before reading `mosaic.json`, `gain.json` or any tile, and refuses
+  requests for other datasets. A change of key invalidates existing logins and
+  viewer links.
+- The service serves the virtual OME-Zarr 0.5 chunks and the local Neuroglancer
+  client (bundled with the `neuroglancer` package) from one origin, so no CORS
+  or reverse proxy is needed. The bundled client is served under
+  `/virtual-zarr/v/viewer/` because the python-integration build requires a
+  `/v/.../` URL path segment to initialize; a cosmetic "Connecting to Python
+  server" status at the bottom of the viewer is safe to ignore.
+- Output chunks are composed on demand from the source tiles; first visits to a
+  region are slower than a materialized stitched Zarr. Datasets stay loaded in a
+  bounded RAM cache until the manifest or `gain.json` changes. Both Flask tile
+  alignment and virtual chunk compositing now share process memory; the service
+  still limits concurrent chunk work and runs with one Uvicorn worker.
+
 ## External auth config
 
 `setup_auth()` in `auth.py` reads an INI-style config file via
@@ -170,7 +216,7 @@ that memory usage.
 
 ## Caveats & warnings
 
-- `app.py` runs with `debug=True` on `0.0.0.0:1414`.
+- `app.py` starts one Uvicorn worker on `0.0.0.0:1414` without a debug reloader.
 - Mutating routes (edit, create, restart, move) are `@login_required`, but `/datasets`
   currently is not.
 - Edits write to the **live** database — the bot picks up changes on its next scan.

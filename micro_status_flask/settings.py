@@ -5,3 +5,5 @@ FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
 MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 RSCM_FOLDER_STITCHING =  "/CBI_FastStore/clusterStitchTEST"
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
+# Same-origin path for the virtual Zarr service mounted by server.py.
+VIRTUAL_ZARR_SERVICE_PATH = "/virtual-zarr"
