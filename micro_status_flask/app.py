@@ -28,7 +28,6 @@ app, login_manager = setup_auth(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'your-secret-key'
 
 db.init_app(app)
 
@@ -394,7 +393,7 @@ def open_virtual_stitched(dataset_id):
         flash(f'Could not prepare the virtual stitched store: {exc}', 'danger')
         return redirect(url_for('edit_dataset', dataset_id=dataset_id))
     token = virtual_zarr_data_token(dataset_id, str(root))
-    return redirect(f"{settings.VIRTUAL_ZARR_SERVICE_URL.rstrip('/')}/"
+    return redirect(f"{settings.VIRTUAL_ZARR_SERVICE_PATH.rstrip('/')}/"
                     f"datasets/{dataset_id}/viewer?token={token}")
 
 
@@ -560,4 +559,6 @@ def create_dataset():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=1414)
+    from server import main
+
+    main(app)

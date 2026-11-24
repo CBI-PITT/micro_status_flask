@@ -30,8 +30,10 @@ def dataset(tmp_path):
             levels = []
             for i, (shape, scale) in enumerate((((5, 16, 16), (1, 1, 1)),
                                                  ((3, 8, 8), (2, 2, 2)))):
-                array = group.create_dataset(str(i), shape=shape, dtype='uint16',
-                                             chunks=(2, 8, 8))
+                create_array = (group.create_dataset if hasattr(group, 'create_dataset')
+                                else group.create_array)
+                array = create_array(str(i), shape=shape, dtype='uint16',
+                                     chunks=(2, 8, 8))
                 for z in range(shape[0]):
                     array[z, :, :] = (number + 1) * 100 + z * 10 * scale[0]
                 levels.append({'path': str(i), 'coordinateTransformations': [

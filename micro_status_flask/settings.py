@@ -5,7 +5,5 @@ FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
 MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 RSCM_FOLDER_STITCHING =  "/CBI_FastStore/clusterStitchTEST"
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
-# URL the browser uses for the mesospim_virtual_zarr dataset service
-# (started with `python -m virtual_mesospim.service`, see README).
-VIRTUAL_ZARR_SERVICE_URL = "http://localhost:1415"
-# VIRTUAL_ZARR_SERVICE_URL = "http://slogin.cbiserver.pitt.edu:1415"
+# Same-origin path for the virtual Zarr service mounted by server.py.
+VIRTUAL_ZARR_SERVICE_PATH = "/virtual-zarr"
