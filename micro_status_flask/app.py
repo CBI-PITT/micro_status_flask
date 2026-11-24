@@ -129,9 +129,17 @@ def get_data(date_filter, name_filter):
     return columns, rows
 
 
-@app.route('/')
-@login_required
-def index():
+DATASET_LIST_TITLES = {
+    'mesospim': 'MesoSPIM Acquisition Data',
+    'rscm': 'RSCM Acquisition Data',
+}
+
+
+def modality_list_endpoint(modality):
+    return 'rscm_datasets' if (modality or '').lower() == 'rscm' else 'index'
+
+
+def render_dataset_list(modality):
     # Get filters from query parameters
     date_filter = request.args.get('time', 'week')
     pi_id_filter = request.args.get('name', '')
@@ -139,8 +147,8 @@ def index():
     # Fetch all PIs for filter dropdown
     pi_options = [(pi.id, pi.name) for pi in PI.query.order_by(PI.name).all()]
 
-    # Build base query
-    query = Dataset.query
+    # Build base query, restricted to this page's modality
+    query = Dataset.query.filter(Dataset.modality == modality)
 
     # Date filtering
     now = datetime.now()
@@ -171,20 +179,33 @@ def index():
 
     datasets = query.all()
 
+    nav_query = {'time': date_filter}
+    if pi_id_filter:
+        nav_query['name'] = str(pi_id_filter)
+
     return render_template(
         'index.html',
         datasets=datasets,
+        modality=modality,
+        page_title=DATASET_LIST_TITLES[modality],
         selected_filter=date_filter,
         selected_name=pi_id_filter,
         pi_options=pi_options,
+        nav_query=nav_query,
         current_user=current_user
     )
 
 
-@app.route('/datasets')
-def list_datasets():
-    ds = Dataset.query.all()
-    return render_template('datasets.html', datasets=ds)
+@app.route('/')
+@login_required
+def index():
+    return render_dataset_list('mesospim')
+
+
+@app.route('/rscm')
+@login_required
+def rscm_datasets():
+    return render_dataset_list('rscm')
 
 
 @app.route('/datasets/<int:dataset_id>/edit', methods=['GET', 'POST'])
@@ -200,7 +221,7 @@ def edit_dataset(dataset_id):
         form.populate_obj(dataset)
         db.session.commit()
         flash("Dataset updated successfully.", "success")
-        return redirect(url_for('index'))  # or wherever your list route is
+        return redirect(url_for(modality_list_endpoint(dataset.modality)))
 
     show_mosaic = False
     if (dataset.modality or '').lower() == 'mesospim':
@@ -552,7 +573,7 @@ def create_dataset():
         db.session.add(new_dataset)
         db.session.commit()
         flash("Dataset created successfully!", "success")
-        return redirect(url_for('index'))  # or 'index' depending on your list view
+        return redirect(url_for(modality_list_endpoint(new_dataset.modality)))
 
     return render_template('create_dataset.html', form=form)
 

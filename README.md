@@ -62,9 +62,9 @@ The **shared SQLite database is the contract between the two projects**:
 
 | Route | What it does |
 |---|---|
-| `/` | Dashboard: Dataset table filtered by time (`week` / `month` / `year`) and PI. Non-admin users automatically see only their own PI's datasets; the admin account (role ID defined in code) can filter by any PI. |
-| `/datasets` | Full dataset list (currently not login-protected). |
-| `/datasets/<id>/edit` | Edit a record (WTForms with a PI dropdown). Deletion is not supported. |
+| `/` | MesoSPIM dashboard (default page): dataset table filtered by modality, time (`week` / `month` / `year`) and PI. Non-admin users automatically see only their own PI's datasets; the admin account (role ID defined in code) can filter by any PI. |
+| `/rscm` | RSCM dashboard: same table and filters, restricted to RSCM datasets. |
+| `/datasets/<id>/edit` | Edit a record (WTForms with a PI dropdown). After saving, returns to the modality page for the dataset. Deletion is not supported. |
 | `/datasets/new` | Create a new record (sets the `created` timestamp). |
 | `/datasets/<id>/restart` | Restart processing. MesoSPIM: submits `mesospim_utils` (`automated.py`) as a SLURM job (zarr input, `ims` final file). RSCM: writes a stitch-queue file under `RSCM_FOLDER_STITCHING/queueStitch`. |
 | `/datasets/<id>/move` | Move a dataset to `<HIVE_ROOT>`: generates an sbatch script (`rclone copy` → `rclone check` → source to trash, with complete/error markers) under `<FS_ROOT>/tmp/move_jobs`, submits it, sets `moving=1`. |
@@ -217,8 +217,8 @@ app at `/virtual-zarr` and mounts Flask at `/`; Uvicorn serves both on port 1414
 ## Caveats & warnings
 
 - `app.py` starts one Uvicorn worker on `0.0.0.0:1414` without a debug reloader.
-- Mutating routes (edit, create, restart, move) are `@login_required`, but `/datasets`
-  currently is not.
+- Mutating routes (edit, create, restart, move) are `@login_required`; both
+  dashboards (`/`, `/rscm`) are as well.
 - Edits write to the **live** database — the bot picks up changes on its next scan.
 - `data.db` in the repo is a local artifact; the real database is external.
 

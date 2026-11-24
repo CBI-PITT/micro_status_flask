@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-    <h2 class="mb-4">MesoSPIM and RSCM Acquisition Data</h2>
+    <h2 class="mb-4">{{ page_title }}</h2>
     <div class="row">
+        <!-- Modality Switch -->
+        <div class="mb-4">
+            <a class="btn btn-{{ 'primary' if modality == 'mesospim' else 'outline-secondary' }}" href="{{ url_for('index', **nav_query) }}">MesoSPIM</a>
+            <a class="btn btn-{{ 'primary' if modality == 'rscm' else 'outline-secondary' }}" href="{{ url_for('rscm_datasets', **nav_query) }}">RSCM</a>
+        </div>
+
         <!-- Filter Form -->
         <form method="get" class="mb-4">
             <label class="form-label fw-bold">Filter by Date</label>
