@@ -165,6 +165,9 @@ def render_dataset_list(modality):
         query = query.filter(Dataset.created != None)  # Skip NULLs
         query = query.filter(Dataset.created >= since.strftime('%Y-%m-%d'))
 
+    # Most recent first; NULL created rows sort last, id breaks same-second ties
+    query = query.order_by(Dataset.created.desc(), Dataset.id.desc())
+
     # PI-based filtering
     if current_user.get_id() == "CBI_Admin":
         if pi_id_filter:

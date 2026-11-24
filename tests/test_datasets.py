@@ -143,6 +143,26 @@ def test_time_filter_on_mesospim_page(app_client):
     assert 'MesoSPIM/old-ds' in html
 
 
+def test_datasets_sorted_most_recent_first(app_client):
+    app_module, client = app_client
+    now = datetime.now()
+    with app_module.app.app_context():
+        add_dataset(path_on_fast_store='/CBI_FastStore/Acquire/MesoSPIM/old-ds',
+                    created=(now - timedelta(days=60)).strftime(DAY_FORMAT))
+        add_dataset(path_on_fast_store='/CBI_FastStore/Acquire/MesoSPIM/mid-ds',
+                    created=(now - timedelta(days=10)).strftime(DAY_FORMAT))
+        add_dataset(path_on_fast_store='/CBI_FastStore/Acquire/MesoSPIM/new-ds',
+                    created=now.strftime(DAY_FORMAT))
+        add_dataset(path_on_fast_store='/CBI_FastStore/Acquire/MesoSPIM/no-date-ds',
+                    created=None)
+        commit()
+    login(client)
+    html = client.get('/?time=all').get_data(as_text=True)
+    assert html.index('MesoSPIM/new-ds') < html.index('MesoSPIM/mid-ds')
+    assert html.index('MesoSPIM/mid-ds') < html.index('MesoSPIM/old-ds')
+    assert html.index('MesoSPIM/old-ds') < html.index('MesoSPIM/no-date-ds')
+
+
 def test_admin_pi_filter(app_client):
     app_module, client = app_client
     with app_module.app.app_context():
