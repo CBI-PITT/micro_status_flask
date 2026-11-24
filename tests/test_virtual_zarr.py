@@ -76,6 +76,8 @@ def app_client(dataset, monkeypatch):
     monkeypatch.setattr(app_module, 'Dataset', SimpleNamespace(query=_FakeQuery(stub)))
     monkeypatch.setattr(app_module, 'PI',
                         SimpleNamespace(query=_FakeQuery(None), name='name'))
+    monkeypatch.setattr(app_module, 'CLNumber',
+                        SimpleNamespace(query=_FakeQuery(None), name='name'))
     monkeypatch.setattr(app_module.settings, 'VIRTUAL_ZARR_SERVICE_PATH', '/virtual-zarr')
     monkeypatch.setitem(app_module.app.config, 'TESTING', True)
     monkeypatch.setitem(app_module.app.config, 'SESSION_COOKIE_SECURE', False)
@@ -187,6 +189,31 @@ def test_open_uses_manifest_acquisition(app_client, dataset):
                 data={'token': app_module.virtual_zarr_token_serializer().dumps(['CBI_Admin', 1])})
     manifest = json.loads((dataset / 'mosaic.json').read_text())
     assert manifest['positions_zyx'] == second_positions
+
+
+def test_imaris_manifest_preparation_reuses_saved_acquisition(dataset):
+    import app as app_module
+
+    shutil.copytree(dataset / 'scan.ome.zarr', dataset / 'second.ome.zarr')
+    group, _ = mosaic.load_group(dataset, 1)
+    positions = [position.copy() for position in group['stage_positions']]
+    positions[2][2] += 7
+    mosaic.save_positions(dataset, group, positions)
+    before = (dataset / 'mosaic.json').read_text()
+    stub = SimpleNamespace(path_on_fast_store=str(dataset), path_on_hive=None, moved=False)
+    root, selected = app_module.prepare_virtual_mosaic(stub)
+    assert root == dataset
+    assert selected['name'] == 'second.ome.zarr'
+    assert (dataset / 'mosaic.json').read_text() == before
+
+
+def test_imaris_manifest_preparation_creates_stage_positions(dataset):
+    import app as app_module
+
+    stub = SimpleNamespace(path_on_fast_store=str(dataset), path_on_hive=None, moved=False)
+    root, group = app_module.prepare_virtual_mosaic(stub)
+    assert root == dataset
+    assert json.loads((dataset / 'mosaic.json').read_text())['positions_zyx'] == group['stage_positions']
 
 
 def test_open_without_tiles_redirects_with_flash(tmp_path, monkeypatch):

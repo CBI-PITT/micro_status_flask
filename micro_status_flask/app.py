@@ -1,4 +1,5 @@
 import base64
+import getpass
 import hashlib
 import hmac
 import os
@@ -6,6 +7,7 @@ import re
 import shlex
 import sqlite3
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta
 
@@ -16,7 +18,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import settings
 from auth import setup_auth
-from forms import DatasetForm
+from forms import DatasetForm, EditDatasetForm, RSCMEditDatasetForm
 from mosaic import (MosaicError, brightness_data, dataset_directory, list_acquisitions,
                     load_gains, load_group, render_patch, save_gains, save_positions,
                     view_data)
@@ -36,6 +38,7 @@ MOSAIC_TOKEN_MAX_AGE = 24 * 60 * 60
 BRIGHTNESS_TOKEN_SALT = 'mosaic-brightness'
 VIRTUAL_ZARR_TOKEN_SALT = 'virtual-zarr-viewer'
 VIRTUAL_ZARR_TOKEN_MAX_AGE = 24 * 60 * 60
+IMARIS_EXPORT_TOKEN_SALT = 'imaris-export'
 
 
 def mosaic_token_serializer():
@@ -48,6 +51,10 @@ def brightness_token_serializer():
 
 def virtual_zarr_token_serializer():
     return URLSafeTimedSerializer(app.secret_key, salt=VIRTUAL_ZARR_TOKEN_SALT)
+
+
+def imaris_export_token_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt=IMARIS_EXPORT_TOKEN_SALT)
 
 
 def virtual_zarr_data_token(dataset_id, path):
@@ -215,10 +222,16 @@ def rscm_datasets():
 @login_required
 def edit_dataset(dataset_id):
     dataset = Dataset.query.get_or_404(dataset_id)
-    form = DatasetForm(obj=dataset)
+    if (dataset.modality or '').lower() == 'rscm':
+        form = RSCMEditDatasetForm(obj=dataset)
+    else:
+        form = EditDatasetForm(obj=dataset)
 
     # Populate PI choices
     form.pi.choices = [(pi.id, pi.name) for pi in PI.query.order_by(PI.name).all()]
+    # Actual CL numbers as labels, database ids as values
+    form.cl_number.choices = ([('', '-- None --')] +
+                              [(cl.id, cl.name) for cl in CLNumber.query.order_by(CLNumber.name).all()])
 
     if form.validate_on_submit():
         form.populate_obj(dataset)
@@ -234,6 +247,8 @@ def edit_dataset(dataset_id):
             pass
     return render_template('edit_dataset.html', form=form, dataset=dataset,
                            show_mosaic=show_mosaic,
+                           imaris_export_token=imaris_export_token_serializer().dumps(
+                               [current_user.get_id(), dataset_id]),
                            virtual_zarr_token=virtual_zarr_token_serializer().dumps(
                                [current_user.get_id(), dataset_id]))
 
@@ -243,6 +258,24 @@ def mosaic_dataset(dataset_id):
     if (dataset.modality or '').lower() != 'mesospim':
         abort(404)
     return dataset
+
+
+def prepare_virtual_mosaic(dataset):
+    """Reuse aligned tiles, or save stage positions for the first acquisition."""
+    root = dataset_directory(dataset)
+    acquisitions = list_acquisitions(root)
+    if not acquisitions:
+        raise MosaicError('No MesoSPIM OME-Zarr 0.4 acquisitions were found.')
+    acquisition = 0
+    for index in range(len(acquisitions)):
+        _, manifest = load_group(root, index)
+        if manifest is not None:
+            acquisition = index
+            break
+    group, manifest = load_group(root, acquisition)
+    if manifest is None:
+        save_positions(root, group, group['stage_positions'])
+    return root, group
 
 
 @app.route('/datasets/<int:dataset_id>/mosaic')
@@ -394,22 +427,7 @@ def open_virtual_stitched(dataset_id):
     if token_data != [current_user.get_id(), dataset_id]:
         abort(403, description='View authorization does not match this dataset.')
     try:
-        root = dataset_directory(dataset)
-        acquisitions = list_acquisitions(root)
-        if not acquisitions:
-            raise MosaicError('No MesoSPIM OME-Zarr 0.4 acquisitions were found.')
-        # Reuse the acquisition referenced by a valid mosaic.json; otherwise
-        # the first discovered acquisition, whose stage positions create the
-        # manifest on first use.
-        acquisition = 0
-        for index in range(len(acquisitions)):
-            _, manifest = load_group(root, index)
-            if manifest is not None:
-                acquisition = index
-                break
-        group, manifest = load_group(root, acquisition)
-        if manifest is None:
-            save_positions(root, group, group['stage_positions'])
+        root, _ = prepare_virtual_mosaic(dataset)
     except MosaicError as exc:
         flash(str(exc), 'danger')
         return redirect(url_for('edit_dataset', dataset_id=dataset_id))
@@ -419,6 +437,82 @@ def open_virtual_stitched(dataset_id):
     token = virtual_zarr_data_token(dataset_id, str(root))
     return redirect(f"{settings.VIRTUAL_ZARR_SERVICE_PATH.rstrip('/')}/"
                     f"datasets/{dataset_id}/viewer?token={token}")
+
+
+@app.route('/datasets/<int:dataset_id>/export_imaris', methods=['POST'])
+@login_required
+def export_dataset_to_imaris(dataset_id):
+    dataset = mosaic_dataset(dataset_id)
+    try:
+        token_data = imaris_export_token_serializer().loads(
+            request.form.get('token', ''), max_age=VIRTUAL_ZARR_TOKEN_MAX_AGE)
+    except BadSignature:
+        abort(403, description='Export authorization expired or invalid. Reload the edit page.')
+    if token_data != [current_user.get_id(), dataset_id]:
+        abort(403, description='Export authorization does not match this dataset.')
+
+    try:
+        root, group = prepare_virtual_mosaic(dataset)
+        acquisition_name = group['name'] if group['name'] != '.' else root.name
+        base_name = re.sub(r'[^A-Za-z0-9._-]+', '_',
+                           acquisition_name.removesuffix('.ome.zarr'))
+        output = root / 'virtual_ims' / f'{base_name}.ims'
+        if output.exists():
+            flash(f'Imaris export already exists: {output}', 'warning')
+            return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+
+        job_name = f'imaris_{dataset_id:05d}'
+        queued = subprocess.run(
+            ['squeue', '--noheader', f'--user={getpass.getuser()}',
+             f'--name={job_name}', '--format=%i'], capture_output=True, text=True)
+        if queued.returncode != 0:
+            flash(f'Could not check Imaris export jobs: {queued.stderr.strip()}', 'danger')
+            return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+        if queued.stdout.strip():
+            flash(f'Imaris export already queued or running for dataset {dataset_id}.', 'warning')
+            return redirect(url_for('edit_dataset', dataset_id=dataset_id))
+
+        scripts_dir = os.path.join(settings.IMARIS_EXPORT_JOBS_DIR, 'scripts')
+        logs_dir = os.path.join(settings.IMARIS_EXPORT_JOBS_DIR, 'logs')
+        os.makedirs(scripts_dir, exist_ok=True)
+        os.makedirs(logs_dir, exist_ok=True)
+        manifest_path = root / 'mosaic.json'
+        python_path = settings.IMARIS_EXPORT_PYTHON
+        script = f'''#!/bin/bash
+set -euo pipefail
+
+PYIW_PYTHON={shlex.quote(python_path)}
+PYIW_ENV_ROOT="$(dirname "$(dirname "$PYIW_PYTHON")")"
+PYIW_SITE_PACKAGES="$("$PYIW_PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+export LD_LIBRARY_PATH="$PYIW_SITE_PACKAGES/PyImarisWriter:$PYIW_ENV_ROOT/lib:${{LD_LIBRARY_PATH:-}}"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+exec "$PYIW_PYTHON" -u -m virtual_mesospim.export_ims \\
+    {shlex.quote(str(manifest_path))} {shlex.quote(str(output))} \\
+    --reader-threads 8 --writer-threads 16 --max-prefetched-blocks 16
+'''
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=scripts_dir,
+                                         prefix=f'{job_name}_', suffix='.sbatch.sh',
+                                         delete=False) as handle:
+            handle.write(script)
+            script_path = handle.name
+        log_pattern = os.path.join(logs_dir, f'{job_name}_%j.log')
+        submitted = subprocess.run(
+            ['sbatch', '--parsable', '--partition=ai', '--cpus-per-task=32',
+             '--mem=256G', f'--job-name={job_name}',
+             f'--output={log_pattern}', f'--error={log_pattern}', script_path],
+            capture_output=True, text=True)
+        if submitted.returncode != 0:
+            flash(f'Could not submit Imaris export: {submitted.stderr.strip()}', 'danger')
+        else:
+            job_id = submitted.stdout.strip().split(';', 1)[0]
+            log_path = log_pattern.replace('%j', job_id)
+            flash(f'Imaris export submitted as SLURM job {job_id}. '
+                  f'Output: {output}. Log: {log_path}', 'success')
+    except MosaicError as exc:
+        flash(str(exc), 'danger')
+    except OSError as exc:
+        flash(f'Could not prepare or submit Imaris export: {exc}', 'danger')
+    return redirect(url_for('edit_dataset', dataset_id=dataset_id))
 
 
 @app.route('/datasets/<int:dataset_id>/restart', methods=['POST'])

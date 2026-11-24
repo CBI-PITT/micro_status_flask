@@ -2,6 +2,11 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, IntegerField, BooleanField, SelectField, SubmitField, RadioField
 from wtforms.validators import Optional, DataRequired
 
+
+def optional_int(value):
+    return int(value) if value not in (None, '') else None
+
+
 class DatasetForm(FlaskForm):
     class Meta:
         csrf = False
@@ -42,3 +47,31 @@ class DatasetForm(FlaskForm):
     public = RadioField("Public", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
 
     submit = SubmitField("Save")
+
+
+class EditDatasetForm(FlaskForm):
+    class Meta:
+        csrf = False
+    path_on_fast_store = StringField("Path on Fast Store", validators=[Optional()])
+    path_on_hive = StringField("Path on Hive", validators=[Optional()])
+    imaris_file_path = StringField("Imaris File Path", validators=[Optional()])
+    name = StringField("Name", validators=[Optional()])
+    cl_number = SelectField("CL Number", coerce=optional_int, validators=[Optional()],
+                            validate_choice=False)
+    pi = SelectField("PI", coerce=int, validators=[Optional()])
+    imaging_status = StringField("Imaging Status", validators=[Optional()])
+    processing_status = StringField("Processing Status", validators=[Optional()])
+    moved = RadioField("Moved", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    moving = RadioField("Moving", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    paused = RadioField("Paused", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    public = RadioField("Public", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+
+    submit = SubmitField("Save")
+
+
+class RSCMEditDatasetForm(EditDatasetForm):
+    ribbons_total = IntegerField("Ribbons Total", validators=[Optional()])
+    ribbons_finished = IntegerField("Ribbons Finished", validators=[Optional()])
+    z_layers_checked = IntegerField("Z Layers Checked", validators=[Optional()])
+    keep_composites = RadioField("Keep Composites", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)
+    delete_405 = RadioField("Delete 405", choices=[(1, "Yes"), (0, "No")], coerce=int, default=0)

@@ -7,3 +7,5 @@ RSCM_FOLDER_STITCHING =  "/CBI_FastStore/clusterStitchTEST"
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 # Same-origin path for the virtual Zarr service mounted by server.py.
 VIRTUAL_ZARR_SERVICE_PATH = "/virtual-zarr"
+IMARIS_EXPORT_PYTHON = "/h20/home/iana/.conda/envs/pyimariswriter/bin/python"
+IMARIS_EXPORT_JOBS_DIR = "/CBI_FastStore/tmp/imaris_export_jobs"

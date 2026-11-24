@@ -64,12 +64,13 @@ The **shared SQLite database is the contract between the two projects**:
 |---|---|
 | `/` | MesoSPIM dashboard (default page): dataset table filtered by modality, time (`week` / `month` / `year`) and PI. Non-admin users automatically see only their own PI's datasets; the admin account (role ID defined in code) can filter by any PI. |
 | `/rscm` | RSCM dashboard: same table and filters, restricted to RSCM datasets. |
-| `/datasets/<id>/edit` | Edit a record (WTForms with a PI dropdown). After saving, returns to the modality page for the dataset. Deletion is not supported. |
+| `/datasets/<id>/edit` | Edit a curated subset of fields in a two-column layout (RSCM-specific fields appear only for RSCM datasets; unlisted fields and the created timestamp are left untouched). After saving, returns to the modality page for the dataset. Deletion is not supported. |
 | `/datasets/new` | Create a new record (sets the `created` timestamp). |
 | `/datasets/<id>/restart` | Restart processing. MesoSPIM: submits `mesospim_utils` (`automated.py`) as a SLURM job (zarr input, `ims` final file). RSCM: writes a stitch-queue file under `RSCM_FOLDER_STITCHING/queueStitch`. |
 | `/datasets/<id>/move` | Move a dataset to `<HIVE_ROOT>`: generates an sbatch script (`rclone copy` → `rclone check` → source to trash, with complete/error markers) under `<FS_ROOT>/tmp/move_jobs`, submits it, sets `moving=1`. |
 | `/datasets/<id>/mosaic` | Align MesoSPIM OME-Zarr 0.4 tiles on a zoomable z-plane and save the positions in `mosaic.json` beside the dataset. |
 | `/datasets/<id>/virtual_stitched` | **View virtually stitched tiles**: prepares `mosaic.json` beside the dataset when missing (created from the stage positions; a valid existing manifest is reused) and opens the virtually stitched mosaic in Neuroglancer in a new tab (see below). |
+| `/datasets/<id>/export_imaris` | Submit a MesoSPIM virtual-mosaic Imaris export to SLURM's `ai` partition (32 CPUs, 256 GB RAM). |
 | `/login`, `/logout`, `/profile` | LDAP authentication (see below). |
 
 ## Authentication
@@ -202,6 +203,18 @@ app at `/virtual-zarr` and mounts Flask at `/`; Uvicorn serves both on port 1414
   bounded RAM cache until the manifest or `gain.json` changes. Both Flask tile
   alignment and virtual chunk compositing now share process memory; the service
   still limits concurrent chunk work and runs with one Uvicorn worker.
+
+## Export to Imaris
+
+On a MesoSPIM edit page with OME-Zarr tiles, **Export to Imaris** uses the same
+`mosaic.json` as the virtual-stitched viewer (creating it from stage positions
+if needed). It submits `virtual_mesospim.export_ims` using the Python interpreter
+in `IMARIS_EXPORT_PYTHON` and requests the `ai` partition, 32 CPUs and 256 GB RAM.
+The completed file is written to `<dataset>/virtual_ims/<acquisition>.ims`;
+the exporter refuses to overwrite it. SLURM scripts and logs are under
+`IMARIS_EXPORT_JOBS_DIR`; the page reports the job ID, output and log location.
+The existing `imaris_file_path` database field is not changed. Only one job per
+dataset can be queued or running at a time for the submitting account.
 
 ## External auth config
 

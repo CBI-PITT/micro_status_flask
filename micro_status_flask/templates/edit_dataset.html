@@ -20,6 +20,10 @@
                         <input type="hidden" name="token" value="{{ virtual_zarr_token }}">
                         <button type="submit" class="btn btn-info">View virtually stitched tiles</button>
                     </form>
+                    <form method="POST" action="{{ url_for('export_dataset_to_imaris', dataset_id=dataset.id) }}">
+                        <input type="hidden" name="token" value="{{ imaris_export_token }}">
+                        <button type="submit" class="btn btn-success">Export to Imaris</button>
+                    </form>
                 {% endif %}
             </div>
         </div>
@@ -29,7 +33,10 @@
             <form method="POST">
                 {{ form.hidden_tag() }}
 
-                {% for field in form if field.name not in ['csrf_token', 'submit'] %}
+                {% set rscm_fields = ['ribbons_total', 'ribbons_finished', 'z_layers_checked', 'keep_composites', 'delete_405'] if (dataset.modality or '').lower() == 'rscm' else [] %}
+                {% set field_order = ['path_on_fast_store', 'path_on_hive', 'imaris_file_path', 'name', 'cl_number', 'pi', 'imaging_status', 'processing_status', 'moved', 'moving', 'paused', 'public'] + rscm_fields %}
+                {% for field_name in field_order %}
+                    {% set field = form[field_name] %}
                     <div class="mb-3">
                         {{ field.label(class="form-label") }}
                         {% if field.type == 'RadioField' %}
@@ -49,6 +56,11 @@
                         {% endif %}
                     </div>
                 {% endfor %}
+
+                <div class="mb-3">
+                    <label class="form-label">Created</label>
+                    <p class="form-control-plaintext">{{ dataset.created or '' }}</p>
+                </div>
 
                 {{ form.submit(class="btn btn-primary") }}
             </form>
